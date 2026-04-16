@@ -7,6 +7,7 @@ from rest_framework_simplejwt.views import (
 
 from . import views
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
+from .connection_views import ConnectView, FileConnectView, ConnectionListView, ConnectionDetailView, ConnectionRefreshView
 
 
 
@@ -40,6 +41,13 @@ urlpatterns = [
     path('aichat/', views.AiChatView.as_view(), name='AiChatView'),
     path('aichat2/', views.AiStateDetailView.as_view(), name='AiStateDetailView'),
     
+    # Connections
+    path('connect/', ConnectView.as_view(), name='connect'),
+    path('connect/file/', FileConnectView.as_view(), name='connect_file'),
+    path('connections/', ConnectionListView.as_view(), name='connections'),
+    path('connection/<uuid:connection_id>/', ConnectionDetailView.as_view(), name='connection_detail'),
+    path('connection/<uuid:connection_id>/refresh/', ConnectionRefreshView.as_view(), name='connection_refresh'),
+
     # Stream
     path('stream/', StreamStateUpdateView.as_view(), name='StreamStateUpdateView'),
     path('streamToken/', StreamTokenView.as_view(), name='StreamTokenView'),
