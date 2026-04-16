@@ -1,3 +1,18 @@
+"""Database connection management service.
+
+Handle creation, updating, deletion, and schema management of database
+connections. Support multiple connection types including PostgreSQL, MySQL,
+SQLite, CSV, Excel, and SAS7BDAT files.
+
+Key methods:
+    ConnectionService.validate_and_connect(dsn) - Test a DSN by making a real connection.
+    ConnectionService.create_connection(user, dsn, name) - Validate, introspect, and save.
+    ConnectionService.create_csv_connection(user, file_obj, name) - Convert CSV to SQLite.
+    ConnectionService.update_connection(connection, data) - Update name/DSN/options.
+    ConnectionService.refresh_schema(connection) - Re-read live DB, merge preferences.
+    ConnectionService.get_sql_database(connection) - Create a live SQLDatabase for querying.
+"""
+
 import logging
 import sqlite3
 import tempfile

@@ -1,4 +1,14 @@
-"""System prompt for the SQL agent."""
+"""System prompt for the SQL agent.
+
+The prompt instructs the LLM to:
+- Use tools in order: list_tables -> get_table_schema -> run_sql_query -> generate_chart
+- Never run DML statements (INSERT, UPDATE, DELETE, DROP)
+- Limit results to {top_k} rows unless the user specifies otherwise
+- Summarize results instead of returning raw SQL
+- Consider data types when writing queries (CAST when needed)
+
+build_system_prompt(dialect, top_k) fills in the {dialect} and {top_k} placeholders.
+"""
 
 SQL_SYSTEM_PROMPT = """You are a helpful data scientist assistant who is an expert at SQL.
 

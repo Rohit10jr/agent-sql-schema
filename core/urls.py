@@ -40,7 +40,6 @@ urlpatterns = [
     path("threads/<str:thread_id>/", views.ChatDetailView.as_view()),
     # path("threads/<str:thread_id>/delete/", views.ChatDeleteView.as_view()),
     path('aichat/', views.AiChatView.as_view(), name='AiChatView'),
-    path('aichat2/', views.AiStateDetailView.as_view(), name='AiStateDetailView'),
     
     # Connections
     path('connect/', ConnectView.as_view(), name='connect'),

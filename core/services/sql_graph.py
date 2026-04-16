@@ -1,4 +1,24 @@
-"""LangGraph SQL agent that chats with user databases."""
+"""LangGraph SQL agent that chats with user databases.
+
+This module builds a ReAct agent graph that can:
+1. Inspect database schemas (list tables, get column info)
+2. Generate and execute SQL queries
+3. Generate Chart.js visualizations from query results
+4. Maintain conversation history via PostgreSQL checkpointer
+
+Architecture:
+    build_sql_agent(connection) -> Compiled LangGraph
+        Nodes: "agent" (LLM with tools) <-> "tools" (executes tool calls)
+        Checkpointer: PostgresSaver (persists messages per thread_id)
+
+    run_sql_agent(connection, query, thread_id) -> AsyncGenerator
+        Yields typed events for SSE streaming:
+        - ("token", str)        : Text chunk from AI response
+        - ("tool_start", dict)  : Tool call initiated {name, args}
+        - ("tool_result", dict) : Tool finished {name, content}
+        - ("result", dict)      : Structured result {type, content, id}
+        - ("done", str)         : Final AI message text
+"""
 
 import json
 import logging

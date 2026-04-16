@@ -1,4 +1,20 @@
-"""SQL tools for the LangGraph agent to interact with user databases."""
+"""SQL tools for the LangGraph agent to interact with user databases.
+
+This module provides the tools that the LLM agent can call during a conversation.
+Tools are built as closures via build_sql_tools() so each tool captures the specific
+database connection (SQLDatabase instance) it should operate on.
+
+Tools:
+    list_tables() - List all available table names in the database.
+    get_table_schema(table_names) - Get CREATE TABLE statements and sample rows.
+    run_sql_query(query, for_chart, chart_type) - Execute SQL and return results.
+    generate_chart(chart_type, title) - Generate a Chart.js JSON config template.
+
+Helpers:
+    execute_sql_query(db, query) - Standalone SQL execution (used by views too).
+    fill_chart_with_data(chart_json, columns, rows, chart_type) - Inject data into chart config.
+    truncate_value(content, length) - Shorten long string values to save LLM tokens.
+"""
 
 import json
 import logging
