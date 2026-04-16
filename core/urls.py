@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import (
 from . import views
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
 from .connection_views import ConnectView, FileConnectView, ConnectionListView, ConnectionDetailView, ConnectionRefreshView
+from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView
 
 
 
@@ -47,6 +48,16 @@ urlpatterns = [
     path('connections/', ConnectionListView.as_view(), name='connections'),
     path('connection/<uuid:connection_id>/', ConnectionDetailView.as_view(), name='connection_detail'),
     path('connection/<uuid:connection_id>/refresh/', ConnectionRefreshView.as_view(), name='connection_refresh'),
+
+    # SQL Conversations
+    path('sql-conversation/', SQLConversationCreateView.as_view(), name='sql_conversation_create'),
+    path('conversation/<str:thread_id>/query/', SQLQueryView.as_view(), name='sql_query'),
+    path('conversation/<str:thread_id>/run-sql/', RunSQLView.as_view(), name='run_sql'),
+
+    # Results
+    path('result/sql/<uuid:result_id>/', SQLResultUpdateView.as_view(), name='result_sql_update'),
+    path('result/chart/<uuid:result_id>/refresh/', ChartRefreshView.as_view(), name='chart_refresh'),
+    path('result/<uuid:result_id>/export-csv/', ExportCSVView.as_view(), name='export_csv'),
 
     # Stream
     path('stream/', StreamStateUpdateView.as_view(), name='StreamStateUpdateView'),

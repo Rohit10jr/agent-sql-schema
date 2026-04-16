@@ -490,11 +490,7 @@ gemini_llm = ChatGoogleGenerativeAI(
     streaming=False
 )
 
-class ChatTitleSchema(BaseModel):
-    """DataBase Table Schema."""
-    title: str = Field(description="A title that suits the chat")
-
-title_model = llm.with_structured_output(ChatTitleSchema,)
+from core.utils import generate_chat_title
 
 class MemoryExtraction(BaseModel):
     """Extracted facts to remember about the user."""
@@ -721,17 +717,14 @@ class AiChatView(APIView):
                 if new_thread:
                     snapshot = chat_agent.get_state(config)
                     messages = snapshot.values.get("messages", [])[-2:]
-                    
+
                     title_input = "\n".join(
                         dict(m).get("content", "")
                         for m in messages
                         if dict(m).get("content")
                     )
-                    
-                    title_response = title_model.invoke(
-                        f"Generate a short title for this conversation:\n{title_input}"
-                    )
-                    title = title_response.title
+
+                    title = generate_chat_title(title_input)
 
                     ChatSession.objects.create(
                         user_id=request.user.id,
