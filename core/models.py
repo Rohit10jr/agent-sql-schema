@@ -62,12 +62,55 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 DEFAULT_PROJECT_NAME = "New Project"
 DEFAULT_DESCRIPTION = "Ai generated SQl and Schema"
 
+
+class Connection(models.Model):
+    """Stores a database connection that the user wants to query via the SQL agent."""
+
+    class ConnectionType(models.TextChoices):
+        POSTGRES = "postgres", "PostgreSQL"
+        MYSQL = "mysql", "MySQL"
+        MSSQL = "mssql", "Microsoft SQL Server"
+        SQLITE = "sqlite", "SQLite"
+        CSV = "csv", "CSV"
+        EXCEL = "excel", "Excel"
+        SAS = "sas", "SAS"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="connections",
+    )
+    dsn = models.CharField(max_length=500)
+    database = models.CharField(max_length=255)
+    name = models.CharField(max_length=255)
+    type = models.CharField(max_length=20, choices=ConnectionType.choices)
+    dialect = models.CharField(max_length=50, blank=True, null=True)
+    is_sample = models.BooleanField(default=False)
+    options = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "dsn")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.type})"
+
+
 class ChatSession(models.Model):
     thread_id = models.CharField(max_length=50, unique=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="ai_projects",
+    )
+    connection = models.ForeignKey(
+        Connection,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
     )
     title = models.CharField(
         max_length=255,
@@ -77,12 +120,28 @@ class ChatSession(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # def save(self, *args, **kwargs):
-    #     if not self.thread_id:
-    #         # thread_id: userId-uuid
-    #         self.thread_id = f"{self.user_id}-{uuid.uuid4().hex[:12]}"
-
-    #     super().save(*args, **kwargs)
-
     def __str__(self):
         return f"{self.title} ({self.thread_id})"
+
+
+class Result(models.Model):
+    """Stores structured LLM outputs (SQL queries, run results, charts) linked to a conversation."""
+
+    class ResultType(models.TextChoices):
+        SQL_QUERY_STRING = "SQL_QUERY_STRING", "SQL Query String"
+        SQL_QUERY_RUN_RESULT = "SQL_QUERY_RUN_RESULT", "SQL Query Run Result"
+        CHART_GENERATION_RESULT = "CHART_GENERATION_RESULT", "Chart Generation Result"
+        SELECTED_TABLES = "SELECTED_TABLES", "Selected Tables"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    thread_id = models.CharField(max_length=50, db_index=True)
+    content = models.TextField()
+    type = models.CharField(max_length=30, choices=ResultType.choices)
+    linked_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.type} ({self.id})"
