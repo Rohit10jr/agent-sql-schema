@@ -180,3 +180,63 @@ class PasswordChangeSerializer(serializers.Serializer):
                 "new_password2": "New passwords do not match."
             })
         return data
+
+
+# ── Connection Serializers ──────────────────────────────────────────
+
+from core.models import Connection, Result
+
+
+class ConnectionCreateSerializer(serializers.Serializer):
+    """Validates input for creating a new DSN-based connection."""
+    dsn = serializers.CharField(min_length=3)
+    name = serializers.CharField(max_length=255)
+
+
+class FileConnectionCreateSerializer(serializers.Serializer):
+    """Validates input for creating a connection from an uploaded file."""
+    FILE_TYPE_CHOICES = [
+        ("sqlite", "SQLite"),
+        ("csv", "CSV"),
+        ("excel", "Excel"),
+        ("sas7bdat", "SAS"),
+    ]
+    file = serializers.FileField()
+    type = serializers.ChoiceField(choices=FILE_TYPE_CHOICES)
+    name = serializers.CharField(max_length=255)
+
+
+class ConnectionOutSerializer(serializers.ModelSerializer):
+    """Serializes a Connection for API responses."""
+    class Meta:
+        model = Connection
+        fields = ["id", "name", "dsn", "database", "type", "dialect", "is_sample", "options", "created_at"]
+
+
+class ConnectionUpdateSerializer(serializers.Serializer):
+    """Validates partial updates to a connection (name, dsn, or options)."""
+    name = serializers.CharField(max_length=255, required=False)
+    dsn = serializers.CharField(min_length=3, required=False)
+    options = serializers.JSONField(required=False)
+
+
+# ── Result Serializers ──────────────────────────────────────────────
+
+
+class ResultOutSerializer(serializers.ModelSerializer):
+    """Serializes a Result for API responses."""
+    class Meta:
+        model = Result
+        fields = ["id", "thread_id", "content", "type", "linked_id", "created_at"]
+
+
+class ResultUpdateSerializer(serializers.Serializer):
+    """Validates input for updating a SQL query result."""
+    sql = serializers.CharField()
+    for_chart = serializers.BooleanField(default=False)
+
+
+class ChartRefreshOutSerializer(serializers.Serializer):
+    """Serializes refreshed chart data."""
+    chartjs_json = serializers.CharField()
+    created_at = serializers.DateTimeField()
