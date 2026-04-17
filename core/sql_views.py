@@ -44,60 +44,85 @@ class SQLQueryView(APIView):
 
         connection = chat.connection
 
-        def stream_generator():
-            try:
-                for event_type, data in run_sql_agent_sync(
-                    connection=connection,
-                    query=query,
-                    thread_id=thread_id,
-                    secure_data=secure_data,
-                ):
-                    if event_type == "token":
-                        payload = json.dumps({"type": "token", "text": data})
-                        yield f"data: {payload}\n\n"
+        # ── Non-streaming debug mode ────────────────────────────
+        # Collects all events and returns as a single JSON response.
+        # Switch back to streaming once confirmed working.
+        try:
+            events = []
+            for event_type, data in run_sql_agent_sync(
+                connection=connection,
+                query=query,
+                thread_id=thread_id,
+                secure_data=secure_data,
+            ):
+                events.append({"event": event_type, "data": data})
 
-                    elif event_type == "tool_start":
-                        payload = json.dumps({"type": "tool_start", "name": data["name"], "args": _safe_serialize(data["args"])})
-                        yield f"data: {payload}\n\n"
+                # Store structured results in DB
+                if event_type == "result":
+                    Result.objects.create(
+                        thread_id=thread_id,
+                        content=json.dumps(data["content"]),
+                        type=data["type"],
+                    )
 
-                    elif event_type == "tool_result":
-                        payload = json.dumps({"type": "tool_result", "name": data["name"], "content": data["content"][:500]})
-                        yield f"data: {payload}\n\n"
+            return Response({"events": events})
 
-                    elif event_type == "result":
-                        # Store the result in the database
-                        result = Result.objects.create(
-                            thread_id=thread_id,
-                            content=json.dumps(data["content"]),
-                            type=data["type"],
-                        )
+        except Exception as e:
+            logger.exception("Error in SQL query")
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-                        payload = json.dumps({
-                            "type": "result",
-                            "result_type": data["type"],
-                            "result_id": str(result.id),
-                            "content": data["content"],
-                        })
-                        yield f"data: {payload}\n\n"
-
-                    elif event_type == "done":
-                        payload = json.dumps({"type": "done", "text": data})
-                        yield f"data: {payload}\n\n"
-
-                # Auto-generate title on first message
-                if chat.title in ("New Chat", None, ""):
-                    title = generate_and_save_title(thread_id, query)
-                    payload = json.dumps({"type": "title", "thread_id": thread_id, "title": title})
-                    yield f"data: {payload}\n\n"
-
-            except Exception as e:
-                logger.exception("Error in SQL query stream")
-                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
-
-        response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
-        response["Cache-Control"] = "no-cache"
-        response["X-Accel-Buffering"] = "no"
-        return response
+        # ── Streaming mode (uncomment when ready) ───────────────
+        # def stream_generator():
+        #     try:
+        #         for event_type, data in run_sql_agent_sync(
+        #             connection=connection,
+        #             query=query,
+        #             thread_id=thread_id,
+        #             secure_data=secure_data,
+        #         ):
+        #             if event_type == "token":
+        #                 payload = json.dumps({"type": "token", "text": data})
+        #                 yield f"data: {payload}\n\n"
+        #
+        #             elif event_type == "tool_start":
+        #                 payload = json.dumps({"type": "tool_start", "name": data["name"], "args": _safe_serialize(data["args"])})
+        #                 yield f"data: {payload}\n\n"
+        #
+        #             elif event_type == "tool_result":
+        #                 payload = json.dumps({"type": "tool_result", "name": data["name"], "content": data["content"][:500]})
+        #                 yield f"data: {payload}\n\n"
+        #
+        #             elif event_type == "result":
+        #                 result = Result.objects.create(
+        #                     thread_id=thread_id,
+        #                     content=json.dumps(data["content"]),
+        #                     type=data["type"],
+        #                 )
+        #                 payload = json.dumps({
+        #                     "type": "result",
+        #                     "result_type": data["type"],
+        #                     "result_id": str(result.id),
+        #                     "content": data["content"],
+        #                 })
+        #                 yield f"data: {payload}\n\n"
+        #
+        #             elif event_type == "done":
+        #                 payload = json.dumps({"type": "done", "text": data})
+        #                 yield f"data: {payload}\n\n"
+        #
+        #         if chat.title in ("New Chat", None, ""):
+        #             title = generate_and_save_title(thread_id, query)
+        #             payload = json.dumps({"type": "title", "thread_id": thread_id, "title": title})
+        #             yield f"data: {payload}\n\n"
+        #
+        #     except Exception as e:
+        #         logger.exception("Error in SQL query stream")
+        #         yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+        #
+        # response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
+        # response["Cache-Control"] = "no-cache"
+        # response["X-Accel-Buffering"] = "no"
+        # return response
 
 
 class RunSQLView(APIView):

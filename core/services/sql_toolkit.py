@@ -44,8 +44,20 @@ def truncate_value(content: Any, length: int = 300) -> Any:
     return content[:length - 3] + "..."
 
 
+FORBIDDEN_KEYWORDS = {"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "REPLACE", "MERGE", "GRANT", "REVOKE"}
+
+
+def validate_read_only(query: str) -> None:
+    """Raise ValueError if the query is not a read-only SELECT statement."""
+    first_keyword = query.strip().split()[0].upper() if query.strip() else ""
+    if first_keyword in FORBIDDEN_KEYWORDS:
+        raise ValueError(f"{first_keyword} statements are not allowed. Only SELECT queries are permitted.")
+
+
 def execute_sql_query(db: SQLDatabase, query: str, for_chart: bool = False, chart_type: Optional[ChartType] = None) -> dict:
     """Execute SQL and return {"columns": [...], "rows": [...]}."""
+    validate_read_only(query)
+
     with db._engine.connect() as conn:
         result = conn.execute(text(query))
         columns = list(result.keys())
@@ -100,6 +112,12 @@ def build_sql_tools(db: SQLDatabase, secure_data: bool = False):
         Chart queries MUST return exactly 2 columns: labels and values.
         If you get an error, rewrite the query and try again.
         NEVER run this without calling get_table_schema first!"""
+        # Block DML/DDL statements — only SELECT is allowed
+        try:
+            validate_read_only(query)
+        except ValueError as e:
+            return f"ERROR: {e}"
+
         try:
             ct = ChartType[chart_type] if chart_type else None
             result = execute_sql_query(db, query, for_chart, ct)
