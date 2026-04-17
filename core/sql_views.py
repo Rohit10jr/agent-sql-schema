@@ -15,7 +15,7 @@ from rest_framework.permissions import IsAuthenticated
 from core.models import ChatSession, Connection, Result
 from core.serializers import ResultOutSerializer
 from core.services.connection import ConnectionService, ConnectionError
-from core.services.sql_graph import run_sql_agent
+from core.services.sql_graph import run_sql_agent_sync
 from core.services.sql_toolkit import execute_sql_query, fill_chart_with_data, ChartType
 from core.utils import generate_and_save_title
 
@@ -44,69 +44,48 @@ class SQLQueryView(APIView):
 
         connection = chat.connection
 
-        import asyncio
-
         def stream_generator():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
             try:
-                async def _stream():
-                    result_ids = {}  # Map temp IDs to stored Result UUIDs
+                for event_type, data in run_sql_agent_sync(
+                    connection=connection,
+                    query=query,
+                    thread_id=thread_id,
+                    secure_data=secure_data,
+                ):
+                    if event_type == "token":
+                        payload = json.dumps({"type": "token", "text": data})
+                        yield f"data: {payload}\n\n"
 
-                    async for event_type, data in run_sql_agent(
-                        connection=connection,
-                        query=query,
-                        thread_id=thread_id,
-                        secure_data=secure_data,
-                    ):
-                        if event_type == "token":
-                            payload = json.dumps({"type": "token", "text": data})
-                            yield f"data: {payload}\n\n"
+                    elif event_type == "tool_start":
+                        payload = json.dumps({"type": "tool_start", "name": data["name"], "args": _safe_serialize(data["args"])})
+                        yield f"data: {payload}\n\n"
 
-                        elif event_type == "tool_start":
-                            payload = json.dumps({"type": "tool_start", "name": data["name"], "args": _safe_serialize(data["args"])})
-                            yield f"data: {payload}\n\n"
+                    elif event_type == "tool_result":
+                        payload = json.dumps({"type": "tool_result", "name": data["name"], "content": data["content"][:500]})
+                        yield f"data: {payload}\n\n"
 
-                        elif event_type == "tool_result":
-                            payload = json.dumps({"type": "tool_result", "name": data["name"], "content": data["content"][:500]})
-                            yield f"data: {payload}\n\n"
+                    elif event_type == "result":
+                        # Store the result in the database
+                        result = Result.objects.create(
+                            thread_id=thread_id,
+                            content=json.dumps(data["content"]),
+                            type=data["type"],
+                        )
 
-                        elif event_type == "result":
-                            # Store the result in the database
-                            result = Result.objects.create(
-                                thread_id=thread_id,
-                                content=json.dumps(data["content"]),
-                                type=data["type"],
-                            )
-                            result_ids[data.get("id")] = str(result.id)
+                        payload = json.dumps({
+                            "type": "result",
+                            "result_type": data["type"],
+                            "result_id": str(result.id),
+                            "content": data["content"],
+                        })
+                        yield f"data: {payload}\n\n"
 
-                            payload = json.dumps({
-                                "type": "result",
-                                "result_type": data["type"],
-                                "result_id": str(result.id),
-                                "content": data["content"],
-                            })
-                            yield f"data: {payload}\n\n"
-
-                        elif event_type == "done":
-                            payload = json.dumps({"type": "done", "text": data})
-                            yield f"data: {payload}\n\n"
-
-                # Run the async generator in a sync context
-                async_gen = _stream()
-                while True:
-                    try:
-                        chunk = loop.run_until_complete(async_gen.__anext__())
-                        yield chunk
-                    except StopAsyncIteration:
-                        break
+                    elif event_type == "done":
+                        payload = json.dumps({"type": "done", "text": data})
+                        yield f"data: {payload}\n\n"
 
                 # Auto-generate title on first message
-                is_first_message = not Result.objects.filter(thread_id=thread_id).exclude(
-                    created_at__gte=chat.created_at
-                ).exists()
-                if is_first_message and chat.title in ("New Chat", None, ""):
+                if chat.title in ("New Chat", None, ""):
                     title = generate_and_save_title(thread_id, query)
                     payload = json.dumps({"type": "title", "thread_id": thread_id, "title": title})
                     yield f"data: {payload}\n\n"
@@ -114,8 +93,6 @@ class SQLQueryView(APIView):
             except Exception as e:
                 logger.exception("Error in SQL query stream")
                 yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
-            finally:
-                loop.close()
 
         response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"

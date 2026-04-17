@@ -11,7 +11,7 @@ Architecture:
         Nodes: "agent" (LLM with tools) <-> "tools" (executes tool calls)
         Checkpointer: PostgresSaver (persists messages per thread_id)
 
-    run_sql_agent(connection, query, thread_id) -> AsyncGenerator
+    run_sql_agent_sync(connection, query, thread_id) -> Generator
         Yields typed events for SSE streaming:
         - ("token", str)        : Text chunk from AI response
         - ("tool_start", dict)  : Tool call initiated {name, args}
@@ -105,22 +105,25 @@ def build_sql_agent(connection: Connection, secure_data: bool = False):
     graph.add_edge("tools", "agent")
 
     # Compile with PostgreSQL checkpointer for message persistence
-    pool = ConnectionPool(conninfo=DB_URI, max_size=3)
+    pool = ConnectionPool(conninfo=DB_URI, min_size=1, max_size=3)
     checkpointer = PostgresSaver(pool)
+    # checkpointer.setup()  # Creates checkpoint tables if they don't exist
 
     return graph.compile(checkpointer=checkpointer)
 
 
-# ── Query Helper ────────────────────────────────────��───────────────
+# ── Query Helper (sync) ─────────────────────────────────────────────
 
-async def run_sql_agent(
+def run_sql_agent_sync(
     connection: Connection,
     query: str,
     thread_id: str,
     secure_data: bool = False,
-    history: list[BaseMessage] | None = None,
 ):
     """Run the SQL agent and yield (event_type, data) tuples for streaming.
+
+    Uses sync stream() with stream_mode=["messages", "updates"] -- same pattern
+    as the existing AiChatView. This works with the sync PostgresSaver.
 
     Event types:
         - "token": A text chunk from the AI response
@@ -132,74 +135,92 @@ async def run_sql_agent(
     app = build_sql_agent(connection, secure_data=secure_data)
 
     config = {"configurable": {"thread_id": thread_id}}
+    input_messages = [HumanMessage(content=query)]
 
-    # Build input messages
-    input_messages = []
-    if history:
-        input_messages.extend(history)
-    input_messages.append(HumanMessage(content=query))
-
-    results = []  # Collect structured results (SQL, charts)
-
-    async for event in app.astream_events(
+    for mode, data in app.stream(
         {"messages": input_messages},
+        stream_mode=["messages", "updates"],
         config=config,
-        version="v2",
     ):
-        kind = event["event"]
+        # ── Token streaming ─────────────────────────────────
+        if mode == "messages":
+            token, metadata = data
+            content = ""
+            if hasattr(token, "content"):
+                content = token.content
 
-        if kind == "on_chat_model_stream":
-            # Token-level streaming from the LLM
-            chunk = event["data"]["chunk"]
-            if hasattr(chunk, "content") and chunk.content:
-                yield ("token", chunk.content)
+            node = metadata.get("langgraph_node", "")
 
-        elif kind == "on_tool_start":
-            tool_name = event.get("name", "")
-            tool_input = event["data"].get("input", {})
-            yield ("tool_start", {"name": tool_name, "args": tool_input})
+            # Only stream tokens from the agent node (LLM output)
+            if content and node == "agent":
+                # Skip tokens that are tool calls (no text content)
+                if hasattr(token, "tool_calls") and token.tool_calls:
+                    continue
+                yield ("token", content)
 
-        elif kind == "on_tool_end":
-            tool_name = event.get("name", "")
-            output = event["data"].get("output", "")
-            content = str(output) if not isinstance(output, str) else output
+        # ── Node completion updates ─────────────────────────
+        elif mode == "updates":
+            for node_name, state_update in data.items():
+                if node_name == "tools":
+                    # Tool node completed -- extract results from messages
+                    messages = state_update.get("messages", [])
+                    for msg in messages:
+                        if hasattr(msg, "name") and hasattr(msg, "content"):
+                            tool_name = msg.name
+                            tool_content = str(msg.content) if msg.content else ""
 
-            # Detect structured results from tool output
-            if tool_name == "run_sql_query":
-                # Extract SQL from the tool input
-                tool_input = event["data"].get("input", {})
-                sql = tool_input.get("query", "") if isinstance(tool_input, dict) else ""
-                for_chart = tool_input.get("for_chart", False) if isinstance(tool_input, dict) else False
-                chart_type = tool_input.get("chart_type") if isinstance(tool_input, dict) else None
+                            yield ("tool_result", {
+                                "name": tool_name,
+                                "content": tool_content[:500],
+                            })
 
-                if sql:
-                    yield ("result", {
-                        "type": "SQL_QUERY_STRING",
-                        "content": {"sql": sql, "for_chart": for_chart},
-                        "id": uuid4().hex,
-                    })
+                elif node_name == "agent":
+                    # Agent node completed -- check for tool calls
+                    messages = state_update.get("messages", [])
+                    for msg in messages:
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                yield ("tool_start", {
+                                    "name": tc["name"],
+                                    "args": tc.get("args", {}),
+                                })
 
-                # Try to parse the run result
+                                # Extract structured results from SQL tool calls
+                                if tc["name"] == "run_sql_query":
+                                    args = tc.get("args", {})
+                                    sql = args.get("query", "")
+                                    for_chart = args.get("for_chart", False)
+                                    if sql:
+                                        yield ("result", {
+                                            "type": "SQL_QUERY_STRING",
+                                            "content": {"sql": sql, "for_chart": for_chart},
+                                            "id": uuid4().hex,
+                                        })
+
+    # Get final state from checkpointer and extract remaining results
+    final_state = app.get_state(config)
+    if final_state and final_state.values.get("messages"):
+        # Emit SQL run results and chart results from tool messages
+        for msg in final_state.values["messages"]:
+            if hasattr(msg, "name") and msg.name == "run_sql_query":
+                content = str(msg.content) if msg.content else ""
                 if not content.startswith("ERROR"):
                     yield ("result", {
                         "type": "SQL_QUERY_RUN_RESULT",
-                        "content": {"raw": content, "for_chart": for_chart},
+                        "content": {"raw": content},
+                        "id": uuid4().hex,
+                    })
+            elif hasattr(msg, "name") and msg.name == "generate_chart":
+                content = str(msg.content) if msg.content else ""
+                if "CHART_JSON:" in content:
+                    chart_json = content.split("CHART_JSON:", 1)[1]
+                    yield ("result", {
+                        "type": "CHART_GENERATION_RESULT",
+                        "content": {"chartjs_json": chart_json},
                         "id": uuid4().hex,
                     })
 
-            elif tool_name == "generate_chart" and "CHART_JSON:" in content:
-                chart_json = content.split("CHART_JSON:", 1)[1]
-                yield ("result", {
-                    "type": "CHART_GENERATION_RESULT",
-                    "content": {"chartjs_json": chart_json},
-                    "id": uuid4().hex,
-                })
-
-            yield ("tool_result", {"name": tool_name, "content": content})
-
-    # Get the final AI message from the checkpointer state
-    final_state = app.get_state(config)
-    if final_state and final_state.values.get("messages"):
+        # Emit the final AI message
         last_msg = final_state.values["messages"][-1]
         if isinstance(last_msg, AIMessage) and last_msg.content:
             yield ("done", last_msg.content)
