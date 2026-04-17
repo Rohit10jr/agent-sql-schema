@@ -125,6 +125,22 @@ class SQLQueryView(APIView):
         # return response
 
 
+class ThreadResultsView(APIView):
+    """GET /api/conversation/<thread_id>/results/ — Get all stored results for a conversation."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, thread_id):
+        try:
+            chat = ChatSession.objects.get(thread_id=thread_id, user=request.user)
+        except ChatSession.DoesNotExist:
+            return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        results = Result.objects.filter(thread_id=thread_id).order_by("created_at")
+        return Response({
+            "data": ResultOutSerializer(results, many=True).data,
+        })
+
+
 class RunSQLView(APIView):
     """POST /api/conversation/<thread_id>/run-sql/ — Execute raw SQL against the conversation's database."""
     permission_classes = [IsAuthenticated]

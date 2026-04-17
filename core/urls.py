@@ -8,7 +8,7 @@ from rest_framework_simplejwt.views import (
 from . import views
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
 from .connection_views import ConnectView, FileConnectView, ConnectionListView, ConnectionDetailView, ConnectionRefreshView
-from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView
+from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView
 
 
 
@@ -51,6 +51,7 @@ urlpatterns = [
     # SQL Conversations
     path('sql-conversation/', SQLConversationCreateView.as_view(), name='sql_conversation_create'),
     path('conversation/<str:thread_id>/query/', SQLQueryView.as_view(), name='sql_query'),
+    path('conversation/<str:thread_id>/results/', ThreadResultsView.as_view(), name='thread_results'),
     path('conversation/<str:thread_id>/run-sql/', RunSQLView.as_view(), name='run_sql'),
 
     # Results
