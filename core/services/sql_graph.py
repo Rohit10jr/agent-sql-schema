@@ -142,21 +142,22 @@ def run_sql_agent_sync(
         stream_mode=["messages", "updates"],
         config=config,
     ):
-        # ── Token streaming ─────────────────────────────────
+        # ── Token streaming (skip — only useful for SSE streaming mode) ──
         if mode == "messages":
-            token, metadata = data
-            content = ""
-            if hasattr(token, "content"):
-                content = token.content
+            # token, metadata = data
+            # content = ""
+            # if hasattr(token, "content"):
+            #     content = token.content
 
-            node = metadata.get("langgraph_node", "")
+            # node = metadata.get("langgraph_node", "")
 
-            # Only stream tokens from the agent node (LLM output)
-            if content and node == "agent":
-                # Skip tokens that are tool calls (no text content)
-                if hasattr(token, "tool_calls") and token.tool_calls:
-                    continue
-                yield ("token", content)
+            # # Only stream tokens from the agent node (LLM output)
+            # if content and node == "agent":
+            #     # Skip tokens that are tool calls (no text content)
+            #     if hasattr(token, "tool_calls") and token.tool_calls:
+            #         continue
+            #     yield ("token", content)
+            continue
 
         # ── Node completion updates ─────────────────────────
         elif mode == "updates":
@@ -168,6 +169,21 @@ def run_sql_agent_sync(
                         if hasattr(msg, "name") and hasattr(msg, "content"):
                             tool_name = msg.name
                             tool_content = str(msg.content) if msg.content else ""
+
+                            # Emit structured results for specific tools
+                            if tool_name == "run_sql_query" and not tool_content.startswith("ERROR"):
+                                yield ("result", {
+                                    "type": "SQL_QUERY_RUN_RESULT",
+                                    "content": {"raw": tool_content},
+                                    "id": uuid4().hex,
+                                })
+                            elif tool_name == "generate_chart" and "CHART_JSON:" in tool_content:
+                                chart_json = tool_content.split("CHART_JSON:", 1)[1]
+                                yield ("result", {
+                                    "type": "CHART_GENERATION_RESULT",
+                                    "content": {"chartjs_json": chart_json},
+                                    "id": uuid4().hex,
+                                })
 
                             yield ("tool_result", {
                                 "name": tool_name,
@@ -197,28 +213,28 @@ def run_sql_agent_sync(
                                             "id": uuid4().hex,
                                         })
 
-    # Get final state from checkpointer and extract remaining results
+    # Get the final AI message from checkpointer
     final_state = app.get_state(config)
     if final_state and final_state.values.get("messages"):
         # Emit SQL run results and chart results from tool messages
-        for msg in final_state.values["messages"]:
-            if hasattr(msg, "name") and msg.name == "run_sql_query":
-                content = str(msg.content) if msg.content else ""
-                if not content.startswith("ERROR"):
-                    yield ("result", {
-                        "type": "SQL_QUERY_RUN_RESULT",
-                        "content": {"raw": content},
-                        "id": uuid4().hex,
-                    })
-            elif hasattr(msg, "name") and msg.name == "generate_chart":
-                content = str(msg.content) if msg.content else ""
-                if "CHART_JSON:" in content:
-                    chart_json = content.split("CHART_JSON:", 1)[1]
-                    yield ("result", {
-                        "type": "CHART_GENERATION_RESULT",
-                        "content": {"chartjs_json": chart_json},
-                        "id": uuid4().hex,
-                    })
+        # for msg in final_state.values["messages"]:
+        #     if hasattr(msg, "name") and msg.name == "run_sql_query":
+        #         content = str(msg.content) if msg.content else ""
+        #         if not content.startswith("ERROR"):
+        #             yield ("result", {
+        #                 "type": "SQL_QUERY_RUN_RESULT",
+        #                 "content": {"raw": content},
+        #                 "id": uuid4().hex,
+        #             })
+        #     elif hasattr(msg, "name") and msg.name == "generate_chart":
+        #         content = str(msg.content) if msg.content else ""
+        #         if "CHART_JSON:" in content:
+        #             chart_json = content.split("CHART_JSON:", 1)[1]
+        #             yield ("result", {
+        #                 "type": "CHART_GENERATION_RESULT",
+        #                 "content": {"chartjs_json": chart_json},
+        #                 "id": uuid4().hex,
+        #             })
 
         # Emit the final AI message
         last_msg = final_state.values["messages"][-1]
