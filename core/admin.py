@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import CustomUser, ChatSession
+from .models import CustomUser, ChatSession, Connection, Result
 
 @admin.register(CustomUser)
 class CustomUserAdmin(UserAdmin):
@@ -38,3 +38,5 @@ class CustomUserAdmin(UserAdmin):
 
 
 admin.site.register(ChatSession)
+admin.site.register(Connection)
+admin.site.register(Result)
