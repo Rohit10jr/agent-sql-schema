@@ -35,7 +35,7 @@ class ChartType(StrEnum):
     scatter = "scatter"
 
 
-def truncate_value(content: Any, length: int = 300) -> Any:
+def truncate_value(content: Any, length: int = 200) -> Any:
     """Truncate a string value to a max length."""
     if not isinstance(content, str) or length <= 0:
         return content
@@ -56,7 +56,7 @@ def validate_read_only(query: str) -> None:
 
 def execute_sql_query(db: SQLDatabase, query: str, for_chart: bool = False, chart_type: Optional[ChartType] = None) -> dict:
     """Execute SQL and return {"columns": [...], "rows": [...]}."""
-    validate_read_only(query)
+    validate_read_only(query) 
 
     with db._engine.connect() as conn:
         result = conn.execute(text(query))
@@ -114,7 +114,7 @@ def build_sql_tools(db: SQLDatabase, secure_data: bool = False):
         NEVER run this without calling get_table_schema first!"""
         # Block DML/DDL statements — only SELECT is allowed
         try:
-            validate_read_only(query)
+            validate_read_only(query) # [!!] redundant with execute_sql_query but provides faster feedback to the LLM
         except ValueError as e:
             return f"ERROR: {e}"
 
