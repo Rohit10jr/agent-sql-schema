@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectView(APIView):
-    """POST /api/connect/ — Create a new database connection from a DSN string."""
+    """POST /api/connect/ — Creates a new database connection from a DSN by validating it, introspecting the database, and saving the connection."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -42,7 +42,7 @@ class ConnectView(APIView):
 
 
 class FileConnectView(APIView):
-    """POST /api/connect/file/ — Create a connection from an uploaded file (SQLite, CSV, Excel, SAS)."""
+    """POST /api/connect/file/ — Creates a new database connection from an uploaded SQLite, CSV, Excel, or SAS file by converting it into a usable database source."""
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
@@ -99,7 +99,7 @@ class FileConnectView(APIView):
 
 
 class ConnectionListView(APIView):
-    """GET /api/connections/ — List all connections for the authenticated user."""
+    """GET /api/connections/ — Returns all saved database connections that belong to the authenticated user."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -110,7 +110,7 @@ class ConnectionListView(APIView):
 
 
 class ConnectionDetailView(APIView):
-    """GET/PATCH/DELETE /api/connection/<id>/ — Retrieve, update, or delete a single connection."""
+    """GET/PATCH/DELETE /api/connection/<id>/ — Retrieves, updates, or deletes a single user-owned database connection by id."""
     permission_classes = [IsAuthenticated]
 
     def _get_connection(self, request, connection_id):
@@ -151,7 +151,7 @@ class ConnectionDetailView(APIView):
 
 
 class ConnectionRefreshView(APIView):
-    """POST /api/connection/<id>/refresh/ — Re-read the live database schema."""
+    """POST /api/connection/<id>/refresh/ —  Re-reads the live database schema for an existing connection and updates its saved schema/table options."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, connection_id):
