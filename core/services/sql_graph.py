@@ -57,6 +57,7 @@ def build_sql_agent(connection: Connection, secure_data: bool = False):
     """Build a compiled LangGraph SQL agent for a given database connection."""
 
     # Create live DB connection and tools
+    # [??] why call initialize the db connection again and again for same session ?
     db = ConnectionService.get_sql_database(connection)
     tools = build_sql_tools(db, secure_data=secure_data)
 
@@ -132,6 +133,8 @@ def run_sql_agent_sync(
         - "result": A structured result (SQL, chart, etc.)
         - "done": Final AI message text
     """
+    # returns graph object
+    # [??] but why initialize it for every call ? unlike in my normal ai call view 
     app = build_sql_agent(connection, secure_data=secure_data)
 
     config = {"configurable": {"thread_id": thread_id}}
