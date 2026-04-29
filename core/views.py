@@ -72,7 +72,7 @@ from rest_framework.decorators import api_view, throttle_classes
 from django.core.mail import EmailMultiAlternatives
 from django.utils.html import strip_tags
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
-
+from core.utils import generate_chat_title
 # from rest_framework.throttling import UserRateThrottle
 
 
@@ -108,7 +108,7 @@ def signup(request):
         token = default_token_generator.make_token(user)
         print("UID:", uid)
         print("TOKEN:", token)
-        verify_url = f"https://frontend.com/verify-email?uid={uid}&token={token}"
+        verify_url = f"http://localhost:3000/verify-email?uid={uid}&token={token}"
         subject = "Verify your email"
         html_content = (
             f"<p>Hi {user.first_name},</p>"
@@ -168,7 +168,7 @@ def logout(request):
 @permission_classes([AllowAny])
 @throttle_classes([FivePerMinuteThrottle])
 def email_verify(request):
-    """Verify an account using uid/token pair."""
+    """Verify an account using uid/token pair and auto-login (return JWT tokens)."""
     uid = request.data.get('uid')
     token = request.data.get('token')
     user = None
@@ -181,14 +181,29 @@ def email_verify(request):
             uid_decoded = force_str(urlsafe_base64_decode(uid))
             user = User.objects.get(pk=uid_decoded)
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            # user = None
             return Response({"message": "Invalid user ID."}, status=status.HTTP_400_BAD_REQUEST)
 
     if user and default_token_generator.check_token(user, token):
-        user.is_active = True
-        user.email_verified = True
-        user.save()
-        return Response({"message": "Email verified successfully."})
+        # Idempotent: if the user clicks the link twice, the second call still issues tokens.
+        if not user.email_verified:
+            user.is_active = True
+            user.email_verified = True
+            user.save()
+
+        # Auto-login: issue JWT pair so the frontend can drop the user straight into the app.
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            "success": True,
+            "message": "Email verified successfully.",
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            },
+        })
 
     return Response({"message": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -209,7 +224,7 @@ def resend_verification(request):
         token = default_token_generator.make_token(user)
         print("UID:", uid)
         print("TOKEN:", token)
-        verify_url = f"https://frontend.com/verify-email?uid={uid}&token={token}"
+        verify_url = f"http://localhost:3000/verify-email?uid={uid}&token={token}"
         send_mail(
             "Verify your email",
             f"Please click the link to verify your email:\n{verify_url}",
@@ -279,7 +294,7 @@ def password_reset(request):
             print("UID:", uid)
             print("TOKEN:", token)
             # Create reset URL
-            reset_url = f"https://frontend.com/reset-password?uid={uid}&token={token}"
+            reset_url = f"http://localhost:3000/reset-password?uid={uid}&token={token}"
             
             # Send email
             subject = "Reset your password"
@@ -490,7 +505,6 @@ gemini_llm = ChatGoogleGenerativeAI(
     streaming=False
 )
 
-from core.utils import generate_chat_title
 
 class MemoryExtraction(BaseModel):
     """Extracted facts to remember about the user."""
@@ -812,26 +826,6 @@ class ChatDetailView(APIView):
             )
 
 
-# class ChatDeleteView(APIView):
-
-#     def delete(self, request, thread_id):
-#         try:
-#             chat = ChatSession.objects.get(thread_id=thread_id, user=request.user)
-
-#             pg_checkpointer.delete_thread(thread_id)
-#             chat.delete()
-
-#             return Response({
-#                 "message": "Chat deleted",
-#                 "thread_id": thread_id
-#             })
-
-#         except ChatSession.DoesNotExist:
-#             return Response(
-#                 {"error": "Chat not found or access denied"},
-#                 status=status.HTTP_404_NOT_FOUND
-#             )
-
 def get_clean_chat_history(raw_messages, reverse=True):
     formatted_history = []
     
@@ -883,23 +877,58 @@ class ChatHistoryView(APIView):
 
             # Extract and format
             raw_messages = state.values.get("messages", [])
-            full_history = get_clean_chat_history(raw_messages)
+            # full_history = get_clean_chat_history(raw_messages)
 
-            start = (page - 1) * page_size
-            end = start + page_size
-            paginated_history = full_history[start:end]
-            
-            has_next = len(full_history) > end
+            # start = (page - 1) * page_size
+            # end = start + page_size
+            # paginated_history = full_history[start:end]
 
-            return Response({
-                "thread_id": thread_id,
-                "meta": {
-                    "total_messages": len(full_history),
-                    "current_page": page,
-                    "has_next": has_next
-                },
-                "chat_history": paginated_history
-            }, status=status.HTTP_200_OK)
+            # has_next = len(full_history) > end
+
+            # return Response({
+            #     "thread_id": thread_id,
+            #     "meta": {
+            #         "total_messages": len(full_history),
+            #         "current_page": page,
+            #         "has_next": has_next
+            #     },
+            #     "chat_history": paginated_history
+            # }, status=status.HTTP_200_OK)
+
+            # ── Raw message response (no cleaning, all messages incl. tool calls/results) ──
+            # def _serialize_message(m):
+            #     content = getattr(m, "content", "")
+            #     if not isinstance(content, (str, list, dict, int, float, bool, type(None))):
+            #         content = str(content)
+            #     return {
+            #         "id": getattr(m, "id", None),
+            #         "type": getattr(m, "type", m.__class__.__name__),
+            #         "content": content,
+            #         "name": getattr(m, "name", None),
+            #         "tool_calls": getattr(m, "tool_calls", None) or [],
+            #         "tool_call_id": getattr(m, "tool_call_id", None),
+            #         "additional_kwargs": getattr(m, "additional_kwargs", {}) or {},
+            #         "response_metadata": getattr(m, "response_metadata", {}) or {},
+            #     }
+            #
+            # serialized = [_serialize_message(m) for m in raw_messages]
+            #
+            # start = (page - 1) * page_size
+            # end = start + page_size
+            # page_messages = serialized[start:end]
+            # has_next = len(serialized) > end
+            #
+            # return Response({
+            #     "thread_id": thread_id,
+            #     "meta": {
+            #         "total_messages": len(serialized),
+            #         "current_page": page,
+            #         "has_next": has_next,
+            #     },
+            #     "raw_messages": page_messages,
+            # }, status=status.HTTP_200_OK)
+
+            return Response({"raw_message": raw_messages}, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response(

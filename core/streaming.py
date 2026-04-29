@@ -116,7 +116,7 @@ builder.add_edge("Node2", END)
 checkpointer = InMemorySaver()
 stream_agent = builder.compile(checkpointer=checkpointer)
 
-# 4. Django View
+
 @method_decorator(csrf_exempt, name='dispatch')
 class StreamStateUpdateView(APIView):
     authentication_classes = [] 
@@ -649,3 +649,28 @@ class StreamSubAgentsView(APIView):
         response['Cache-Control'] = 'no-cache'
         response['X-Accel-Buffering'] = 'no'
         return response
+
+
+
+# ----------------------------------
+# This is with reasoning / thinking
+# ----------------------------------
+
+# for token, metadata in messagegraph.stream(
+#     {"topic": topic},
+#     stream_mode="messages"
+# ):
+#     content = ""
+#     if hasattr(token, 'content_blocks') and token.content_blocks:
+#         block = token.content_blocks[0]
+#         content = getattr(block, 'text', str(block))
+#     elif hasattr(token, 'content'):
+#         content = token.content
+
+#     if content:
+#         payload = json.dumps({
+#             "node": metadata.get('langgraph_node', 'unknown'),
+#             "text": content
+#         })
+#         yield f"data: {payload}\n\n"
+

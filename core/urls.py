@@ -9,6 +9,7 @@ from . import views
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
 from .connection_views import ConnectView, FileConnectView, ConnectionListView, ConnectionDetailView, ConnectionRefreshView
 from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView
+from .sql_agent import SqlAgent
 
 
 
@@ -34,7 +35,7 @@ urlpatterns = [
     # Password change (authenticated)
     path('password/change/', views.password_change, name='password_change'),
     
-    # chat session
+    # generic chat session
     path("threads/<str:thread_id>/history/", views.ChatHistoryView.as_view()),
     path("threads/", views.ChatListView.as_view()),
     path("threads/<str:thread_id>/", views.ChatDetailView.as_view()),
@@ -49,6 +50,7 @@ urlpatterns = [
     path('connection/<uuid:connection_id>/refresh/', ConnectionRefreshView.as_view(), name='connection_refresh'),
 
     # SQL Conversations
+    path('sql-agent/', SqlAgent.as_view(), name='sql_agent'),
     path('sql-conversation/', SQLConversationCreateView.as_view(), name='sql_conversation_create'),
     path('conversation/<str:thread_id>/query/', SQLQueryView.as_view(), name='sql_query'),
     path('conversation/<str:thread_id>/results/', ThreadResultsView.as_view(), name='thread_results'),
