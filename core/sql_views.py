@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class SQLQueryView(APIView):
-    """POST /api/conversation/<thread_id>/query/ — Stream an LLM SQL query via SSE."""
+    """POST /api/conversation/<thread_id>/query/ — Takes a natural-language SQL question for a conversation, runs the SQL agent on that conversation’s linked database, stores structured results, and returns the generated events."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, thread_id):
@@ -125,8 +125,9 @@ class SQLQueryView(APIView):
         # return response
 
 
+# [!!] mostly not required because langchain stores all the tools results as well.
 class ThreadResultsView(APIView):
-    """GET /api/conversation/<thread_id>/results/ — Get all stored results for a conversation."""
+    """GET /api/conversation/<thread_id>/results/ —  Returns all saved Result records for a given conversation thread in chronological order."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request, thread_id):
@@ -141,8 +142,10 @@ class ThreadResultsView(APIView):
         })
 
 
+# [!!] check how to do this in langchain DB, 
+# decide if this is required or not
 class RunSQLView(APIView):
-    """POST /api/conversation/<thread_id>/run-sql/ — Execute raw SQL against the conversation's database."""
+    """POST /api/conversation/<thread_id>/run-sql/ — Executes a raw read-only SQL query directly against the database linked to a conversation and returns columns and rows."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, thread_id):
@@ -176,8 +179,9 @@ class RunSQLView(APIView):
             return Response({"error": f"SQL execution failed: {e}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# [!!] not required, we will create thread id directly in main view
 class SQLConversationCreateView(APIView):
-    """POST /api/sql-conversation/ — Create a new SQL conversation linked to a database connection."""
+    """POST /api/sql-conversation/ — Creates a new chat session linked to one of the user’s saved database connections and returns its thread_id"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -192,7 +196,8 @@ class SQLConversationCreateView(APIView):
         except Connection.DoesNotExist:
             return Response({"error": "Connection not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        thread_id = uuid4().hex[:12]
+        # thread_id = uuid4().hex[:12]
+        thread_id = uuid4()
         chat = ChatSession.objects.create(
             user=request.user,
             thread_id=thread_id,
@@ -210,8 +215,9 @@ class SQLConversationCreateView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+# [!!] mostly not required
 class SQLResultUpdateView(APIView):
-    """PATCH /api/result/sql/<id>/ — Update a stored SQL query string."""
+    """PATCH /api/result/sql/<id>/ — Updates a saved SQL query string result and can optionally rerun it to refresh a linked chart."""
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, result_id):
@@ -290,8 +296,9 @@ class SQLResultUpdateView(APIView):
             return None
 
 
+# [!!] for now, not required
 class ChartRefreshView(APIView):
-    """PATCH /api/result/chart/<id>/refresh/ — Re-run SQL and refresh chart data."""
+    """PATCH /api/result/chart/<id>/refresh/ — Re-runs the SQL behind a saved chart result and updates the chart JSON with fresh database data."""
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, result_id):
@@ -343,8 +350,9 @@ class ChartRefreshView(APIView):
             return Response({"error": f"Chart refresh failed: {e}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# [!!] check how to do this with the Langchain Message DB
 class ExportCSVView(APIView):
-    """GET /api/result/<id>/export-csv/ — Re-run SQL and stream as CSV download."""
+    """GET /api/result/<id>/export-csv/ — Re-executes a saved SQL query and streams the current result as a downloadable CSV file."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request, result_id):
