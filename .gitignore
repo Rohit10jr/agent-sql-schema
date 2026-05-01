@@ -137,3 +137,6 @@ dmypy.json
 cython_debug/
 /dev_core_*.py
 /main_core_*.py
+
+
+resources/
