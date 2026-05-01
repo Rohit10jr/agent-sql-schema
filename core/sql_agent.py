@@ -330,15 +330,29 @@ def _safe_serialize(obj: Any) -> Any:
         return str(obj)
 
 
-def _extract_token_content(token: Any) -> str:
-    """Extract streaming text — surfaces both reasoning blocks and final text."""
-    content = ""
+def _extract_token_content(token: Any) -> tuple[str, str]:
+    """Returns (kind, text). `kind` is 'reasoning' or 'text'.
+
+    Groq / OpenAI o-series stream `content_blocks` of two shapes:
+      { type: 'reasoning', reasoning: '...' }  → kind='reasoning'
+      { type: 'text',      text: '...'      }  → kind='text'
+    """
     if hasattr(token, "content_blocks") and token.content_blocks:
         block = token.content_blocks[0]
-        content = getattr(block, "text", str(block))
-    elif hasattr(token, "content"):
-        content = token.content
-    return content
+        if isinstance(block, dict):
+            block_type = str(block.get("type") or "text")
+            text = block.get("reasoning") if block_type == "reasoning" else block.get("text", "")
+        else:
+            block_type = str(getattr(block, "type", "") or "text")
+            if block_type == "reasoning":
+                text = getattr(block, "reasoning", "")
+            else:
+                text = getattr(block, "text", "")
+        return ("reasoning" if block_type == "reasoning" else "text"), str(text or "")
+
+    if hasattr(token, "content"):
+        return "text", str(token.content or "")
+    return "text", ""
 
 # ── View ───────────────────────────────────────────────────────────
 
@@ -420,10 +434,11 @@ class SqlAgent(APIView):
                     # ─── 1. MESSAGES MODE — token + reasoning streaming ─────
                     if mode == "messages":
                         token, metadata = data
-                        content = _extract_token_content(token)
+                        kind, content = _extract_token_content(token)
                         if content:
                             yield _sse({
                                 "type": "token",
+                                "kind": kind,                              # 'reasoning' | 'text'
                                 "node": metadata.get("langgraph_node", "unknown"),
                                 "text": content,
                             })
