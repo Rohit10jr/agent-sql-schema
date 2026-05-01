@@ -772,7 +772,7 @@ class ChatListView(APIView):
             {
                 "thread_id": c.thread_id,
                 "title": c.title,
-                # "created_at": c.created_at
+                "created_at": c.created_at
             }
             for c in chats
         ]
@@ -852,83 +852,39 @@ class ChatHistoryView(APIView):
 
     def get(self, request, thread_id):
         user = request.user
-        page = int(request.query_params.get("page", 1))
-        page_size = int(request.query_params.get("page_size", 10))
 
-        # 1. Check if the thread exists and belongs to the logged-in user
+        # 1. Check the thread exists and belongs to the logged-in user.
         thread_exists = ChatSession.objects.filter(
-            thread_id=thread_id, 
-            user=user
+            thread_id=thread_id,
+            user=user,
         ).exists()
-
         if not thread_exists:
             return Response(
                 {"error": "Forbidden: You do not have permission to access this chat state."},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         try:
-            # 2. If ownership is verified, fetch the state from LangGraph
+            # 2. Pull raw messages from the SQL agent's checkpointer.
+            from core.sql_agent import sql_agent
+            from core.services.chat_history_formatter import format_chat_history
+
             config = {"configurable": {"thread_id": thread_id}}
-            state = chat_agent.get_state(config)
+            state = sql_agent.get_state(config)
 
             if not state or "messages" not in state.values:
-                return Response({"messages": []}, status=status.HTTP_200_OK)
+                return Response(
+                    {"thread_id": thread_id, "messages": []},
+                    status=status.HTTP_200_OK,
+                )
 
-            # Extract and format
             raw_messages = state.values.get("messages", [])
-            # full_history = get_clean_chat_history(raw_messages)
 
-            # start = (page - 1) * page_size
-            # end = start + page_size
-            # paginated_history = full_history[start:end]
-
-            # has_next = len(full_history) > end
-
-            # return Response({
-            #     "thread_id": thread_id,
-            #     "meta": {
-            #         "total_messages": len(full_history),
-            #         "current_page": page,
-            #         "has_next": has_next
-            #     },
-            #     "chat_history": paginated_history
-            # }, status=status.HTTP_200_OK)
-
-            # ── Raw message response (no cleaning, all messages incl. tool calls/results) ──
-            # def _serialize_message(m):
-            #     content = getattr(m, "content", "")
-            #     if not isinstance(content, (str, list, dict, int, float, bool, type(None))):
-            #         content = str(content)
-            #     return {
-            #         "id": getattr(m, "id", None),
-            #         "type": getattr(m, "type", m.__class__.__name__),
-            #         "content": content,
-            #         "name": getattr(m, "name", None),
-            #         "tool_calls": getattr(m, "tool_calls", None) or [],
-            #         "tool_call_id": getattr(m, "tool_call_id", None),
-            #         "additional_kwargs": getattr(m, "additional_kwargs", {}) or {},
-            #         "response_metadata": getattr(m, "response_metadata", {}) or {},
-            #     }
-            #
-            # serialized = [_serialize_message(m) for m in raw_messages]
-            #
-            # start = (page - 1) * page_size
-            # end = start + page_size
-            # page_messages = serialized[start:end]
-            # has_next = len(serialized) > end
-            #
-            # return Response({
-            #     "thread_id": thread_id,
-            #     "meta": {
-            #         "total_messages": len(serialized),
-            #         "current_page": page,
-            #         "has_next": has_next,
-            #     },
-            #     "raw_messages": page_messages,
-            # }, status=status.HTTP_200_OK)
-
-            return Response({"raw_message": raw_messages}, status=status.HTTP_200_OK)
+            # 3. Format raw LangGraph messages → UI-friendly turns + parts.
+            return Response(
+                format_chat_history(raw_messages, thread_id=thread_id),
+                status=status.HTTP_200_OK,
+            )
 
         except Exception as e:
             return Response(
