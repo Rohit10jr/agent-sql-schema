@@ -55,6 +55,9 @@ class UserContext:
     db: SQLDatabase
     connection: Connection
     secure_data: bool = False
+    # Model name (Groq model id) — picked by the user per-request.
+    # Pre-initialised LLMs are looked up by this key in LLMS_WITH_TOOLS.
+    model: str = ""
 
 
 # ── Chart helpers ──────────────────────────────────────────────────
@@ -264,30 +267,46 @@ def generate_chart(
 
 # ── LLM & Graph (compiled once, reused per request) ────────────────
 
-llm = ChatGroq(
-    model="openai/gpt-oss-120b",
-    temperature=0.1,
-    max_tokens=4000,
-    timeout=60,
-    api_key=GROQ_API_KEY,
-    max_retries=3,
+# Models exposed to users — pre-initialised at import time so requests don't
+# pay the cost of constructing ChatGroq + bind_tools every call. Add a model
+# here to expose it; remove and it disappears from the picker.
+SUPPORTED_MODELS = (
+    "openai/gpt-oss-120b",
+    "groq/compound",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "qwen/qwen3-32b",
 )
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
-# [!!] example of create_agent
-# agent = create_agent(
-#     model=llm,
-#     tools=[web_search, get_weather], 
-#     system_prompt="You are a helpful assistant")
+def _build_llm(model_name: str) -> ChatGroq:
+    return ChatGroq(
+        model=model_name,
+        temperature=0.1,
+        max_tokens=4000,
+        timeout=60,
+        api_key=GROQ_API_KEY,
+        max_retries=3,
+    )
+
 
 tools = [list_tables, get_table_schema, run_sql_query, generate_chart]
-llm_with_tools = llm.bind_tools(tools)
+
+LLMS_WITH_TOOLS: dict[str, Any] = {
+    name: _build_llm(name).bind_tools(tools) for name in SUPPORTED_MODELS
+}
 
 
 def call_model(state: SQLAgentState, runtime: Runtime[UserContext]) -> dict:
     messages = state["messages"]
     connection = runtime.context.connection
     dialect = connection.dialect or connection.type
+    model_name = runtime.context.model or DEFAULT_MODEL
+    print("----- model_name -----")
+    print(model_name)
+
+    # Fall back to default if the user passed an unknown / unsupported model.
+    llm_with_tools = LLMS_WITH_TOOLS.get(model_name) or LLMS_WITH_TOOLS[DEFAULT_MODEL]
 
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=build_system_prompt(dialect=dialect))] + messages
@@ -365,6 +384,9 @@ class SqlAgent(APIView):
         thread_id = request.data.get("thread_id")
         connection_id = request.data.get("connection_id")
         secure_data = request.data.get("secure_data", False)
+        # Model defaults to DEFAULT_MODEL when omitted or unsupported.
+        requested_model = request.data.get("model") or DEFAULT_MODEL
+        model = requested_model if requested_model in LLMS_WITH_TOOLS else DEFAULT_MODEL
 
         if not query:
             return Response({"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -411,6 +433,7 @@ class SqlAgent(APIView):
             db=db,
             connection=connection,
             secure_data=secure_data,
+            model=model,
         )
 
         def stream_generator():
