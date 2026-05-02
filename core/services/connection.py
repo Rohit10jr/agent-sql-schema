@@ -35,6 +35,32 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(settings.BASE_DIR) / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
+# DB system schemas we never want to expose to the SQL agent.
+SYSTEM_SCHEMAS = {
+    # Postgres
+    "information_schema",
+    "pg_catalog",
+    "pg_toast",
+    # MySQL / MariaDB
+    "mysql",
+    "sys",
+    "performance_schema",
+    # MSSQL
+    "INFORMATION_SCHEMA",
+    "sys",
+}
+
+
+def _is_user_schema(name: str) -> bool:
+    """True for application schemas; False for DB-internal system schemas."""
+    if not name:
+        return False
+    if name in SYSTEM_SCHEMAS:
+        return False
+    if name.startswith("pg_"):  # pg_temp_1, pg_toast_temp_1, etc.
+        return False
+    return True
+
 
 class ConnectionError(Exception):
     """Raised when a database connection cannot be established."""
@@ -87,11 +113,11 @@ class ConnectionService:
 
     @staticmethod
     def introspect_schema(db: SQLDatabase) -> dict:
-        """Read all schemas and tables from a live database connection.
+        """Read user (non-system) schemas and tables from a live database connection.
         Returns the options dict: {"schemas": [{"name": ..., "enabled": True, "tables": [...]}]}"""
         engine = db._engine
         inspector = inspect(engine)
-        schema_names = inspector.get_schema_names()
+        schema_names = [n for n in inspector.get_schema_names() if _is_user_schema(n)]
 
         schemas = []
         for schema_name in schema_names:
@@ -116,7 +142,7 @@ class ConnectionService:
         - Removed tables are dropped"""
         engine = db._engine
         inspector = inspect(engine)
-        schema_names = inspector.get_schema_names()
+        schema_names = [n for n in inspector.get_schema_names() if _is_user_schema(n)]
 
         if not old_options or not old_options.get("schemas"):
             return ConnectionService.introspect_schema(db)
@@ -307,24 +333,49 @@ class ConnectionService:
     @staticmethod
     def get_sql_database(connection: Connection) -> SQLDatabase:
         """Create a live SQLDatabase instance from a stored connection,
-        respecting the user's enabled/disabled schema and table preferences."""
-        options = connection.options
-        if options and options.get("schemas"):
-            enabled_schemas = [s for s in options["schemas"] if s["enabled"]]
-            schemas = [s["name"] for s in enabled_schemas]
-            include_tables = [
-                f"{s['name']}.{t['name']}"
-                for s in enabled_schemas
-                for t in s.get("tables", [])
-                if t["enabled"]
-            ]
-        else:
-            schemas = None
-            include_tables = None
+        respecting the user's enabled/disabled schema and table preferences.
 
+        Defensively skips DB system schemas so connections introspected before
+        the system-schema filter was added still work.
+        """
+        options = connection.options
+        enabled_schemas: list[dict] = []
+        if options and options.get("schemas"):
+            enabled_schemas = [
+                s for s in options["schemas"]
+                if s.get("enabled") and _is_user_schema(s.get("name", ""))
+            ]
+
+        if not enabled_schemas:
+            # Nothing user-configured — let SQLDatabase do default discovery.
+            engine = create_engine(connection.dsn)
+            return SQLDatabase(engine)
+
+        # Single schema → scope SQLDatabase to it; pass bare table names.
+        if len(enabled_schemas) == 1:
+            schema = enabled_schemas[0]
+            include_tables = [
+                t["name"]
+                for t in schema.get("tables", [])
+                if t.get("enabled")
+            ]
+            engine = create_engine(connection.dsn)
+            return SQLDatabase(
+                engine,
+                schema=schema["name"],
+                include_tables=include_tables or None,
+            )
+
+        # Multiple schemas → no scoping; SQLDatabase looks at the default schema.
+        # Only include enabled tables from that schema (best-effort fallback).
+        include_tables = [
+            t["name"]
+            for s in enabled_schemas
+            for t in s.get("tables", [])
+            if t.get("enabled")
+        ]
         engine = create_engine(connection.dsn)
         return SQLDatabase(
             engine,
-            schema=schemas[0] if schemas and len(schemas) == 1 else None,
-            include_tables=[t.split(".")[-1] for t in include_tables] if include_tables else None,
+            include_tables=include_tables or None,
         )
