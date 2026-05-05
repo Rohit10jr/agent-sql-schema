@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
-from .models import CustomUser, ChatSession, Connection, Result
+from .models import CustomUser, ChatSession, Connection, Result, TokenUsage
 
 
 class CustomUserCreationForm(UserCreationForm):
@@ -73,3 +73,4 @@ class ConnectionAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Result)
+admin.site.register(TokenUsage)
