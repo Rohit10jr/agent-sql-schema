@@ -32,7 +32,7 @@ from sqlalchemy import text
 from typing_extensions import TypedDict
 
 # ── Local ──────────────────────────────────────────────────────────
-from core.models import ChatSession, Connection, Result
+from core.models import ChatSession, Connection, Result, TokenUsage
 from core.services.connection import ConnectionService
 from core.services.sql_prompt import build_system_prompt
 from core.utils import generate_chat_title
@@ -475,8 +475,23 @@ class SqlAgent(APIView):
                             )
 
                             if node_name == "agent":
-                                # Agent finished: surface tool calls + persist SQL strings
+                                # Agent finished: persist token usage + surface tool calls + persist SQL strings
                                 for msg in messages:
+                                    # Persist token usage (one row per LLM round-trip)
+                                    usage = getattr(msg, "usage_metadata", None) or {}
+                                    if usage:
+                                        details = usage.get("output_token_details") or {}
+                                        TokenUsage.objects.create(
+                                            user=request.user,
+                                            thread_id=thread_id,
+                                            model_name=model,
+                                            provider="groq",
+                                            input_tokens=int(usage.get("input_tokens") or 0),
+                                            output_tokens=int(usage.get("output_tokens") or 0),
+                                            reasoning_tokens=int(details.get("reasoning") or 0),
+                                            total_tokens=int(usage.get("total_tokens") or 0),
+                                        )
+
                                     for tc in getattr(msg, "tool_calls", None) or []:
                                         tc_name = tc["name"]
                                         tc_args = tc.get("args", {})
