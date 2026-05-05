@@ -49,6 +49,9 @@ urlpatterns = [
     path('connection/<uuid:connection_id>/', ConnectionDetailView.as_view(), name='connection_detail'),
     path('connection/<uuid:connection_id>/refresh/', ConnectionRefreshView.as_view(), name='connection_refresh'),
 
+    # Token usage
+    path('usage/', views.UsageView.as_view(), name='usage'),
+
     # SQL Conversations
     path('sql-agent/', SqlAgent.as_view(), name='sql_agent'),
     path('sql-conversation/', SQLConversationCreateView.as_view(), name='sql_conversation_create'),

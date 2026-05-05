@@ -892,3 +892,82 @@ class ChatHistoryView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
+
+# ── Token Usage ─────────────────────────────────────────────────────
+
+class UsageView(APIView):
+    """GET /api/usage/?granularity=hour|day|month|year — token usage for the caller."""
+    permission_classes = [IsAuthenticated]
+
+    GRANULARITY_CONFIG = {
+        "hour":  {"days": 1,    "trunc_kind": "hour"},
+        "day":   {"days": 30,   "trunc_kind": "day"},
+        "month": {"days": 365,  "trunc_kind": "month"},
+        "year":  {"days": 365 * 5, "trunc_kind": "year"},
+    }
+
+    QUOTA = 1_000_000  # tokens — TODO: per-user override later
+
+    def get(self, request):
+        from datetime import timedelta
+        from django.utils import timezone
+        from django.db.models import Sum
+        from django.db.models.functions import TruncDate, TruncHour, TruncMonth, TruncYear
+        from core.models import TokenUsage
+
+        granularity = request.query_params.get("granularity", "day")
+        config = self.GRANULARITY_CONFIG.get(granularity)
+        if config is None:
+            return Response(
+                {"error": "granularity must be one of: hour, day, month, year"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        since = timezone.now() - timedelta(days=config["days"])
+
+        trunc_map = {
+            "hour":  TruncHour("created_at"),
+            "day":   TruncDate("created_at"),
+            "month": TruncMonth("created_at"),
+            "year":  TruncYear("created_at"),
+        }
+        trunc = trunc_map[config["trunc_kind"]]
+
+        rows = (
+            TokenUsage.objects
+            .filter(user=request.user, created_at__gte=since)
+            .annotate(bucket=trunc)
+            .values("bucket")
+            .annotate(
+                input_tokens=Sum("input_tokens"),
+                output_tokens=Sum("output_tokens"),
+                reasoning_tokens=Sum("reasoning_tokens"),
+                total_tokens=Sum("total_tokens"),
+            )
+            .order_by("bucket")
+        )
+
+        all_time = TokenUsage.objects.filter(user=request.user).aggregate(
+            total=Sum("total_tokens"),
+        )
+        total_used = all_time["total"] or 0
+
+        percent_used = round((total_used / self.QUOTA) * 100, 2) if self.QUOTA else 0
+
+        return Response({
+            "granularity": granularity,
+            "buckets": [
+                {
+                    "bucket": r["bucket"].isoformat() if r["bucket"] else None,
+                    "input_tokens": r["input_tokens"] or 0,
+                    "output_tokens": r["output_tokens"] or 0,
+                    "reasoning_tokens": r["reasoning_tokens"] or 0,
+                    "total_tokens": r["total_tokens"] or 0,
+                }
+                for r in rows
+            ],
+            "total_used": total_used,
+            "quota": self.QUOTA,
+            "percent_used": percent_used,
+        })
