@@ -145,3 +145,35 @@ class Result(models.Model):
 
     def __str__(self):
         return f"{self.type} ({self.id})"
+
+class TokenUsage(models.Model):
+    """Append-only ledger of LLM token usage. One row per LLM round-trip.
+
+    Written by the agent stream loop (sql_agent.SqlAgent.stream_generator) when
+    each AIMessage update arrives carrying `usage_metadata`.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="token_usage",
+    )
+    thread_id = models.CharField(max_length=50, db_index=True, blank=True)
+    model_name = models.CharField(max_length=128)
+    provider = models.CharField(max_length=32, default="groq")
+
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    reasoning_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} · {self.model_name} · {self.total_tokens}t"
