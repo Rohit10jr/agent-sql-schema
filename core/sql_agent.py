@@ -58,6 +58,9 @@ class UserContext:
     # Model name (Groq model id) — picked by the user per-request.
     # Pre-initialised LLMs are looked up by this key in LLMS_WITH_TOOLS.
     model: str = ""
+    # Most recent chart-bound query result, populated by run_sql_query when
+    # for_chart=True and consumed by generate_chart to fill the Chart.js JSON.
+    last_chart_data: Optional[dict] = None
 
 
 # ── Chart helpers ──────────────────────────────────────────────────
@@ -225,6 +228,16 @@ def run_sql_query(
         columns = result["columns"]
         rows = result["rows"]
 
+        # Stash full data so a follow-up generate_chart call can fill the
+        # Chart.js JSON without re-querying. Validation in execute_sql_query
+        # has already enforced 2-column shape for chart queries.
+        if for_chart and chart_type:
+            runtime.context.last_chart_data = {
+                "columns": columns,
+                "rows": rows,
+                "chart_type": chart_type,
+            }
+
         if secure_data:
             if rows:
                 data_types = [type(cell).__name__ for cell in rows[0]]
@@ -262,7 +275,21 @@ def generate_chart(
         ct = ChartType[chart_type]
     except KeyError:
         return f"ERROR: Invalid chart type '{chart_type}'. Use: bar, line, doughnut, scatter."
-    return f"CHART_JSON:{json.dumps(_build_chart_config(ct, title))}"
+
+    skeleton = json.dumps(_build_chart_config(ct, title))
+    cached = runtime.context.last_chart_data
+    if cached and cached.get("rows"):
+        try:
+            filled = fill_chart_with_data(
+                skeleton,
+                cached["columns"],
+                cached["rows"],
+                chart_type,
+            )
+            return f"CHART_JSON:{filled}"
+        except Exception as e:
+            logger.warning("fill_chart_with_data failed: %s", e)
+    return f"CHART_JSON:{skeleton}"
 
 
 # ── LLM & Graph (compiled once, reused per request) ────────────────
@@ -531,10 +558,13 @@ class SqlAgent(APIView):
                                     if not name:
                                         continue
 
+                                    # Charts ship a full Chart.js JSON in `content` and are
+                                    # rendered by the frontend — never truncate those.
+                                    sse_content = content if name == "generate_chart" else content[:500]
                                     yield _sse({
                                         "type": "tool_result",
                                         "name": name,
-                                        "content": content[:500],
+                                        "content": sse_content,
                                     })
 
                                     if name == "run_sql_query" and not content.startswith("ERROR"):
