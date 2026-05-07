@@ -465,6 +465,7 @@ class SqlAgent(APIView):
 
         def stream_generator():
             last_run_result_id: Optional[Any] = None  # link CHART_GENERATION_RESULT -> SQL_QUERY_RUN_RESULT
+            produced_response = False  # any AIMessage content this turn? gates ChatSession cleanup on failure
 
             try:
                 if new_thread:
@@ -602,12 +603,12 @@ class SqlAgent(APIView):
                 last = final_messages[-1] if final_messages else None
 
                 if isinstance(last, AIMessage) and last.content:
+                    produced_response = True
                     yield _sse({"type": "done", "text": last.content})
 
-                if new_thread:
-                    title_input = f"User: {query}\n"
-                    if isinstance(last, AIMessage) and last.content:
-                        title_input += f"Assistant: {last.content}"
+                # Only title-generate on success — failed runs get cleaned up below.
+                if new_thread and produced_response:
+                    title_input = f"User: {query}\nAssistant: {last.content}"
                     title = generate_chat_title(title_input)
                     chat.title = title
                     chat.save(update_fields=["title"])
@@ -616,6 +617,25 @@ class SqlAgent(APIView):
             except Exception as e:
                 logger.exception("SQL agent stream failed")
                 yield _sse({"type": "error", "error": str(e)})
+
+            finally:
+                # If this was a brand-new chat and the agent never produced a real
+                # response, drop the empty ChatSession so it doesn't clutter the
+                # sidebar. Runs even on client disconnect.
+                if new_thread and not produced_response:
+                    try:
+                        deleted, _ = ChatSession.objects.filter(
+                            thread_id=thread_id, user=request.user
+                        ).delete()
+                        if deleted:
+                            logger.info(
+                                "Deleted empty ChatSession %s after failed first turn",
+                                thread_id,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Failed to clean up empty ChatSession %s", thread_id
+                        )
 
         response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"
