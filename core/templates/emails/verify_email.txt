@@ -1,0 +1,7 @@
+Hi {{ user.first_name|default:"there" }},
+
+Welcome to {{ site_name }}. Verify your email address by visiting:
+
+{{ verify_url }}
+
+If you didn't sign up for {{ site_name }}, ignore this email.

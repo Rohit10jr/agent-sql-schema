@@ -161,14 +161,33 @@ SITE_ID = 1
 
 AUTH_USER_MODEL = "core.CustomUser"
 
-# EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# ── Email ──────────────────────────────────────────────────────────
+# Default to SMTP. To preview emails in the runserver console during
+# development, set EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+# in .env. Console mode prints the rendered email instead of sending.
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'localhost')
-EMAIL_PORT = int(os.getenv('EMAIL_PORT', 1025))
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes')
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower() in ('true', '1', 'yes')
+_email_timeout = os.getenv('EMAIL_TIMEOUT')
+if _email_timeout:
+    EMAIL_TIMEOUT = int(_email_timeout)
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@agent.com')
+SERVER_EMAIL = os.getenv('SERVER_EMAIL', DEFAULT_FROM_EMAIL)
+
+# Admin notification recipients (used by Django for unhandled-error emails
+# and any explicit mail_admins() calls). Comma-separated in DJANGO_ADMIN_EMAIL.
+_admin_emails = [e.strip() for e in os.getenv('DJANGO_ADMIN_EMAIL', '').split(',') if e.strip()]
+ADMINS = [(e.split('@')[0], e) for e in _admin_emails]
+
+# Frontend origin used to build verification + password-reset links in emails.
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+# Display name shown in transactional emails. Falls back to DEFAULT_FROM_EMAIL.
+EMAIL_SITE_NAME = os.getenv('EMAIL_SITE_NAME', 'DataAgent')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

@@ -1,0 +1,21 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Verify your email{% endblock %}
+{% block content %}
+	<h1 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#111;">Verify your email</h1>
+	<p style="font-size:15px;color:#333;line-height:1.5;margin:0 0 16px;">
+		Hi {{ user.first_name|default:"there" }},
+	</p>
+	<p style="font-size:15px;color:#333;line-height:1.5;margin:0 0 16px;">
+		Welcome to {{ site_name }}. Click the button below to verify your email address and activate your account.
+	</p>
+	<p style="margin:24px 0;">
+		<a href="{{ verify_url }}" style="display:inline-block;padding:10px 20px;background:#111;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:500;">Verify email</a>
+	</p>
+	<p style="font-size:13px;color:#666;margin:0 0 8px;">Or copy this link into your browser:</p>
+	<p style="font-size:13px;color:#0066cc;word-break:break-all;margin:0 0 16px;">
+		<a href="{{ verify_url }}" style="color:#0066cc;text-decoration:none;">{{ verify_url }}</a>
+	</p>
+	<p style="font-size:13px;color:#888;line-height:1.5;margin:24px 0 0;border-top:1px solid #eee;padding-top:16px;">
+		If you didn't sign up for {{ site_name }}, you can safely ignore this email.
+	</p>
+{% endblock %}

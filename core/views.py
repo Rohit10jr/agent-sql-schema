@@ -73,6 +73,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.utils.html import strip_tags
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from core.utils import generate_chat_title
+from core.services.email import send_verification_email, send_password_reset_email
 # from rest_framework.throttling import UserRateThrottle
 
 
@@ -103,29 +104,8 @@ def signup(request):
     if serializer.is_valid():
         user = serializer.save()
 
-        # prepare verification token and url
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        token = default_token_generator.make_token(user)
-        print("UID:", uid)
-        print("TOKEN:", token)
-        verify_url = f"http://localhost:3000/verify-email?uid={uid}&token={token}"
-        subject = "Verify your email"
-        html_content = (
-            f"<p>Hi {user.first_name},</p>"
-            f"<p>Please click the link below to verify your email address:</p>"
-            f"<p><a href='{verify_url}'>{verify_url}</a></p>"
-            f"<p>If you didn't request this, please ignore this email.</p>"
-        )
-        text_content = strip_tags(html_content)
-        email = EmailMultiAlternatives(
-            subject, 
-            text_content, 
-            settings.DEFAULT_FROM_EMAIL, 
-            [user.email]
-        )
-        email.attach_alternative(html_content, "text/html")
         try:
-            email.send(fail_silently=False)
+            send_verification_email(user)
         except Exception:
             return Response(
                 {
@@ -220,18 +200,11 @@ def resend_verification(request):
         user = None
 
     if user and not getattr(user, 'email_verified', False):
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        token = default_token_generator.make_token(user)
-        print("UID:", uid)
-        print("TOKEN:", token)
-        verify_url = f"http://localhost:3000/verify-email?uid={uid}&token={token}"
-        send_mail(
-            "Verify your email",
-            f"Please click the link to verify your email:\n{verify_url}",
-            settings.EMAIL_HOST_USER,
-            [email],
-            fail_silently=False,
-        )
+        try:
+            send_verification_email(user)
+        except Exception:
+            # Generic response anyway — don't reveal send failures to callers.
+            pass
     return Response({
         "message": "If the account exists and is not verified, a verification email has been sent."
     })
@@ -287,37 +260,14 @@ def password_reset(request):
         email = serializer.validated_data['email']
         try:
             user = User.objects.get(email=email)
-            # user = User.objects.get(email__iexact=email, is_active=True)
-            # Generate reset token
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            token = default_token_generator.make_token(user)
-            print("UID:", uid)
-            print("TOKEN:", token)
-            # Create reset URL
-            reset_url = f"http://localhost:3000/reset-password?uid={uid}&token={token}"
-            
-            # Send email
-            subject = "Reset your password"
-            html_content = (
-                f"<p>Hi {user.first_name},</p>"
-                f"<p>We received a request to reset your password. Click the link below:</p>"
-                f"<p><a href='{reset_url}'>{reset_url}</a></p>"
-                f"<p>This link expires in 1 hour.</p>"
-                f"<p>If you didn't request this, please ignore this email.</p>"
-            )
-            text_content = strip_tags(html_content)
-            email_obj = EmailMultiAlternatives(
-                subject,
-                text_content,
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email]
-            )
-            email_obj.attach_alternative(html_content, "text/html")
-            email_obj.send(fail_silently=False)
+            send_password_reset_email(user)
         except User.DoesNotExist:
             # Generic response - don't reveal if email exists
             pass
-    
+        except Exception:
+            # Don't leak send failures either.
+            pass
+
     return Response(
         {"message": "If the account exists, a password reset link has been sent."},
         status=status.HTTP_200_OK
