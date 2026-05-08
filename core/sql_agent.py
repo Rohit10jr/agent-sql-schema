@@ -1,6 +1,7 @@
 # ── stdlib ─────────────────────────────────────────────────────────
 import json
 import logging
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Optional
@@ -319,6 +320,117 @@ def _build_llm(model_name: str) -> ChatGroq:
 
 tools = [list_tables, get_table_schema, run_sql_query, generate_chart]
 
+
+# ── Guardrails ─────────────────────────────────────────────────────
+#
+# Catches abusive / unsafe / out-of-scope user input *before* it reaches the
+# LLM. Destructive SQL is NOT checked here — sql_toolkit.validate_read_only
+# owns that and inspects the actual query, which is more accurate than
+# pattern-matching natural language.
+#
+# Each category has its own pattern list + refusal message. Patterns are
+# matched as whole words (\b boundaries, case-insensitive) to avoid the
+# Scunthorpe problem (e.g. "class" wouldn't trip an "ass" entry).
+# Categories are checked in priority order: threats → hate → sexual →
+# prompt-injection. Threats first so users in crisis see the helpline.
+
+# THREAT_PATTERNS = (
+#     "kill yourself", "kys", "kms", "kill myself",
+#     "i'll kill", "i will kill", "gonna kill",
+#     "shoot up", "shoot you", "shoot them",
+#     "bomb you", "bomb the",
+#     "hope you die", "want you dead",
+#     "want to die", "i should die", "going to die",
+#     "end my life", "end it all",
+#     "harm myself", "harm yourself", "hurt myself", "hurt yourself",
+#     "commit suicide", "thinking of suicide",
+# )
+
+HATE_PATTERNS = (
+    "nigger", "nigga",
+    "faggot",
+    "tranny",
+    "retard", "retarded",
+    "kike",
+    "chink", "ching chong",
+    "spic",
+    "gook",
+    "wetback",
+    "towelhead", "raghead",
+    "gypped",
+)
+
+SEXUAL_PATTERNS = (
+    "blowjob", "handjob", "rimjob", "footjob",
+    "cunnilingus", "fellatio",
+    "cumshot", "jizz",
+    "masturbate", "masturbation",
+    "jack off", "jerk off",
+    "pornhub", "xvideos", "xnxx", "redtube", "onlyfans",
+    "suck my", "fuck me", "want to fuck you",
+)
+
+INJECTION_PATTERNS = (
+    "ignore previous instructions", "ignore all previous", "ignore the above",
+    "forget previous instructions", "forget your instructions",
+    "forget all instructions", "forget what i told you",
+    "system prompt", "your prompt",
+    "you are now", "pretend you are", "pretend to be",
+    "act as if", "act as a",
+    "developer mode", "jailbreak", "dan mode",
+    "override your", "bypass your",
+)
+
+# REFUSAL_THREAT = (
+#     "I can't engage with messages about harming yourself or others. "
+#     "If you're in distress, please contact a local crisis line."
+# )
+REFUSAL_HATE = (
+    "Your message contains language I can't respond to. "
+    "Please rephrase respectfully and try again."
+)
+REFUSAL_SEXUAL = (
+    "That's outside the scope of this assistant. "
+    "I'm here to help with questions about your database."
+)
+REFUSAL_INJECTION = (
+    "I can't change my role or override my instructions. "
+    "Ask a question about your data and I'll do my best to help."
+)
+
+
+def _compile_patterns(patterns: tuple[str, ...]) -> re.Pattern:
+    """Build a single \\b-bounded, case-insensitive regex from a list of phrases."""
+    body = "|".join(re.escape(p) for p in patterns)
+    return re.compile(rf"\b(?:{body})\b", re.IGNORECASE)
+
+
+# Order matters: first match wins. Threats first (helpline response),
+# then hate, sexual, injection.
+GUARDRAILS: tuple[tuple[str, re.Pattern, str], ...] = (
+    # ("threat",    _compile_patterns(THREAT_PATTERNS),    REFUSAL_THREAT),
+    ("hate",      _compile_patterns(HATE_PATTERNS),      REFUSAL_HATE),
+    ("sexual",    _compile_patterns(SEXUAL_PATTERNS),    REFUSAL_SEXUAL),
+    ("injection", _compile_patterns(INJECTION_PATTERNS), REFUSAL_INJECTION),
+)
+
+
+def _guardrail_refusal(messages: list[BaseMessage]) -> Optional[str]:
+    """Return a category-specific refusal if the latest user message trips a guardrail."""
+    latest_user = next(
+        (m for m in reversed(messages) if isinstance(m, HumanMessage)),
+        None,
+    )
+    if not latest_user:
+        return None
+    text = str(latest_user.content or "")
+    for category, regex, refusal in GUARDRAILS:
+        match = regex.search(text)
+        if match:
+            logger.info("Guardrail tripped: category=%s match=%r", category, match.group(0))
+            return refusal
+    return None
+
 LLMS_WITH_TOOLS: dict[str, Any] = {
     name: _build_llm(name).bind_tools(tools) for name in SUPPORTED_MODELS
 }
@@ -326,11 +438,19 @@ LLMS_WITH_TOOLS: dict[str, Any] = {
 
 def call_model(state: SQLAgentState, runtime: Runtime[UserContext]) -> dict:
     messages = state["messages"]
+
+    # Guardrail: bail out with a prebuilt refusal if the user's input hits a
+    # blocked pattern. The returned AIMessage carries no tool_calls, so
+    # should_continue routes the graph straight to END and the user sees the
+    # refusal via the same `done` SSE event as any normal answer.
+    refusal = _guardrail_refusal(messages)
+    if refusal:
+        return {"messages": [AIMessage(content=refusal)]}
+
     connection = runtime.context.connection
     dialect = connection.dialect or connection.type
     model_name = runtime.context.model or DEFAULT_MODEL
-    print("----- model_name -----")
-    print(model_name)
+    print(f"=== model_name : {model_name} ===")
 
     # Fall back to default if the user passed an unknown / unsupported model.
     llm_with_tools = LLMS_WITH_TOOLS.get(model_name) or LLMS_WITH_TOOLS[DEFAULT_MODEL]
