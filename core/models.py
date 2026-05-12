@@ -177,3 +177,130 @@ class TokenUsage(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id} · {self.model_name} · {self.total_tokens}t"
+
+
+
+# semantic search example
+# from pgvector.django import VectorField
+# from utils.utils import generate_embedding
+
+# class JobPost(models.Model):
+#     JOB_TYPES = [
+#         ("Full-Time", "Full-Time"),
+#         ("Part-Time", "Part-Time"),
+#         ("Contract", "Contract"),
+#         ("Internship", "Internship"),
+#         ("Temporary", "Temporary"),
+#         ("Volunteer", "Volunteer"),
+#         ("Other", "Other")
+#     ]
+
+#     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="job_post")
+#     author = models.ForeignKey(EmployerProfile, on_delete = models.SET_NULL, null=True, blank=True, related_name="job_post_author")
+#     title = models.CharField(max_length=255)
+#     description = models.TextField()
+#     requirements = models.TextField()
+#     location = models.CharField(max_length=255)
+#     salary_range = models.CharField(max_length=10, null=True, blank=True)
+#     job_type = models.CharField(max_length=30, choices=JOB_TYPES)
+#     posted_date = models.DateField(auto_now_add=True)
+#     embedding = VectorField(dimensions=768, blank=True, null=True)
+    
+#     def save(self, *args, **kwargs):
+#         """ Override save to generate embeddings before saving. """
+#         content = f"{self.company} {self.title} {self.description} {self.requirements} {self.salary_range} {self.job_type}"
+#         self.embedding = generate_embedding(content)
+#         super(JobPost, self).save(*args, **kwargs)
+
+#     def __str__(self):
+#         return f"{self.title} at {self.company.name}"
+
+
+
+# schema model
+import json
+import uuid
+
+from django.db import models
+from django.conf import settings
+from .llm_models import title_model
+from .prompt import AI_SQL_TITLE_PROMPT
+
+
+DEFAULT_PROJECT_NAME = "New Project"
+DEFAULT_DESCRIPTION = "Ai generated SQl and Schema"
+
+class SchemaProject(models.Model):
+    """
+    Stores AI-generated SQL schema projects.
+    JSON is treated as the source of truth.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="schema_projects",
+    )
+    name = models.CharField(
+        max_length=255,
+        default=DEFAULT_PROJECT_NAME,
+        null=True,
+        blank=True,
+    )
+    description = models.CharField(
+        max_length=255,
+        default=DEFAULT_DESCRIPTION,
+        null=True,
+        blank=True,
+    )
+    slug = models.SlugField(max_length=100, unique=True, blank=True)
+    complete_json = models.JSONField(null=True, blank=True)
+    schema_json = models.JSONField(null=True, blank=True)
+    sql_json = models.JSONField(null=True, blank=True)
+    seed_json = models.JSONField(null=True, blank=True)
+    variants = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save_variant(self, dialect, sql_table, sql_seed):
+        """Helper to save a variant into the nested JSON structure"""
+        if not self.variants:
+            self.variants = {}
+        
+        self.variants[dialect] = {
+            "sql_table": sql_table,
+            "sql_seed_data": sql_seed
+        }
+        # Only update the 'variants' column for performance
+        self.save(update_fields=['variants'])
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            # slug: userId-uuid
+            self.slug = f"{self.user_id}-{uuid.uuid4().hex[:12]}"
+
+        if self.schema_json and (not self.name or self.name == DEFAULT_PROJECT_NAME):
+            try:
+                print("---Inside title generation---")
+
+                # Load the entire schema JSON (no picking tables, no restructuring)
+                schema_data = json.loads(self.schema_json)
+
+                clean_schema_for_ai = json.dumps(schema_data, indent=2)
+
+                title_prompt = AI_SQL_TITLE_PROMPT.format(
+                    schema=clean_schema_for_ai
+                )
+
+                result = title_model.invoke(title_prompt)
+
+                self.name = result.name.strip()
+                self.description = result.description.strip()
+
+            except Exception as e:
+                print("Title generation failed:", e)
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.slug})"

@@ -110,11 +110,11 @@ class UpdateUserProfileSerializer(serializers.ModelSerializer):
         }
 
 
-class MessageSerializer(serializers.Serializer):
-    """Used for AI prompt"""
+# class MessageSerializer(serializers.Serializer):
+#     """Used for AI prompt"""
     
-    slug = serializers.CharField(max_length=15,  required=False)
-    message = serializers.CharField(max_length=5000)
+#     slug = serializers.CharField(max_length=15,  required=False)
+#     message = serializers.CharField(max_length=5000)
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
@@ -240,3 +240,51 @@ class ChartRefreshOutSerializer(serializers.Serializer):
     """Serializes refreshed chart data."""
     chartjs_json = serializers.CharField()
     created_at = serializers.DateTimeField()
+
+# ==== SCHEMA Project Serializers ====
+
+from .models import SchemaProject
+
+class MessageSerializer(serializers.Serializer):
+    """Used for AI prompt"""
+    
+    thread_id = serializers.CharField(max_length=15,  required=False)
+    query = serializers.CharField(max_length=5000)
+
+
+class SchemaProjectListSerializer(serializers.ModelSerializer):
+    """Used for listing project cards"""
+
+    class Meta:
+        model = SchemaProject
+        fields = ["id", "name", "slug", "description"]
+
+
+class SchemaProjectDetailSerializer(serializers.ModelSerializer):
+    """Used for opening a single project"""
+
+    schema_table = serializers.JSONField(source="schema_json", read_only=True)
+    sql_table = serializers.JSONField(source="sql_json", read_only=True)
+    sql_seed_data = serializers.JSONField(source="seed_json", read_only=True)
+    # complete_json = serializers.JSONField(read_only=True)
+
+    class Meta:
+        model = SchemaProject
+        fields = [
+            "id",
+            "user",
+            "name",
+            "slug",
+            "schema_table",
+            "sql_table",
+            "sql_seed_data",
+            # "complete_json",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class SchemaProjectUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SchemaProject
+        fields = ["name", "description"]
