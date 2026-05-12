@@ -139,6 +139,6 @@ cython_debug/
 /main_core_*.py
 
 
+dump.rdb
 resources/
-
 data/

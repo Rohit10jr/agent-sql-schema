@@ -469,17 +469,17 @@ def should_continue(state: SQLAgentState) -> str:
     return END
 
 
-graph = StateGraph(SQLAgentState, context_schema=UserContext)
-graph.add_node("agent", call_model)
-graph.add_node("tools", ToolNode(tools))
-graph.add_edge(START, "agent")
-graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-graph.add_edge("tools", "agent")
+sql_graph = StateGraph(SQLAgentState, context_schema=UserContext)
+sql_graph.add_node("agent", call_model)
+sql_graph.add_node("tools", ToolNode(tools))
+sql_graph.add_edge(START, "agent")
+sql_graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
+sql_graph.add_edge("tools", "agent")
 
 _pool = ConnectionPool(conninfo=DB_URI, min_size=1, max_size=3)
 _checkpointer = PostgresSaver(_pool)
 # _checkpointer.setup()  # run once on first deploy to create checkpoint tables
-sql_agent = graph.compile(checkpointer=_checkpointer)
+sql_agent = sql_graph.compile(checkpointer=_checkpointer)
 
 
 # ── SSE helpers ────────────────────────────────────────────────────
