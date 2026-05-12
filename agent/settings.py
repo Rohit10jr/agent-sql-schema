@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     # 'django_filters',
     # 'django_celery_results',
     # 'rest_framework.authtoken',
+    'django_celery_results',
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
 
@@ -224,3 +225,13 @@ SIMPLE_JWT = {
 }
 
 PASSWORD_RESET_TIMEOUT = 3600  # 1 hour in seconds
+
+
+
+
+# --- celery ---
+
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_BACKEND = "django-db"
