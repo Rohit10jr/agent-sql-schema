@@ -142,3 +142,6 @@ cython_debug/
 dump.rdb
 resources/
 data/
+
+core/streaming_v2.py
+core/streaming.py

@@ -248,7 +248,7 @@ from .models import SchemaProject
 class MessageSerializer(serializers.Serializer):
     """Used for AI prompt"""
     
-    thread_id = serializers.CharField(max_length=15,  required=False)
+    thread_id = serializers.CharField(required=False)
     query = serializers.CharField(max_length=5000)
 
 

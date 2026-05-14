@@ -36,6 +36,14 @@ def _get_title_model():
     return _title_llm
 
 
+# llm = ChatGroq(
+#     model="llama-3.3-70b-versatile",
+#     temperature=0,
+#     max_tokens=50,
+#     api_key=os.getenv("GROQ_API_KEY"),
+#     max_retries=2,
+# )
+# _title_llm = llm.with_structured_output(ChatTitleSchema)
 def generate_chat_title(messages_text: str) -> str:
     """Generate a short conversation title from message content.
 
@@ -46,6 +54,8 @@ def generate_chat_title(messages_text: str) -> str:
         A short title string.
     """
     try:
+
+        # [??] why call _get_title_model() and not define it outside and call title_model directly in this function?
         title_model = _get_title_model()
         response = title_model.invoke(
             f"Generate a short title (under 8 words) for this conversation:\n{messages_text}"

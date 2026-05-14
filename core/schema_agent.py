@@ -34,7 +34,7 @@ from .prompt import (
     TEST_TABLE_SCHEMA_SYSTEM_PROMPT,
 )
 from .serializers import MessageSerializer
-from .tasks import save_schema_project
+from .tasks import persist_schema_project, save_schema_project
 from .utils import generate_chat_title
 
 logger = logging.getLogger(__name__)
@@ -132,9 +132,9 @@ def descision_node(state: SqlState):
 
     new_messages = [HumanMessage(content=user_prompt), AIMessage(content=result.answer)]
     print("--- Decision Node ---")
-    print( "valid_intent", result.valid_intent)
-    print( "generate", result.generate)
-    print( "explain", result.explain)
+    # print( "valid_intent", result.valid_intent)
+    # print( "generate", result.generate)
+    # print( "explain", result.explain)
     return {
         "messages": new_messages,
         "valid_intent": result.valid_intent,
@@ -186,7 +186,7 @@ def create_table_schema(state: SqlState):
         ]
     )
 
-    print("--- create table schema ---")
+    print("--- Create Table Schema ---")
     ai_message = [AIMessage(content=result.answer)]
     tables_data = [table.model_dump() for table in result.tables]
     tables_dump_data = result.model_dump_json(exclude={"answer"}),
@@ -241,7 +241,7 @@ def generate_sql_node(state: SqlState):
         ]
     )
 
-    print("--- sql generated ---")
+    print("--- SQL Generated ---")
     ai_message = [AIMessage(content=result.answer)]
 
     return {
@@ -305,7 +305,7 @@ def message_node(state: SqlState):
         ]
     )
 
-    print("--- message node ---")
+    print("--- Message Node ---")
     # print("final response:", result.content)
     ai_msg = AIMessage(content=result.content)
 
@@ -377,15 +377,6 @@ class SchemaAgent(APIView):
     Mirrors the SSE shape used by `SqlAgent` so the frontend can share its
     streaming utilities. The underlying graph nodes are unchanged — this view
     just consumes the graph's stream events and translates them into SSE.
-
-    Event types yielded:
-        - thread_created : {"type": "thread_created", "slug": "..."}
-        - node_start     : {"type": "node_start", "node": "...", "label": "..."}
-        - token          : {"type": "token", "kind": "text", "text": "..."}    (message_node only)
-        - result         : {"type": "result", "result_type": "SCHEMA"|"SQL", "content": {...}}
-        - done           : {"type": "done", "text": "<final assistant message>"}
-        - title          : {"type": "title", "slug": "...", "title": "..."}    (new threads only)
-        - error          : {"type": "error", "error": "..."}
     """
 
     permission_classes = [IsAuthenticated]
@@ -502,13 +493,37 @@ class SchemaAgent(APIView):
                 sql_table_json = values.get("sql_table")
                 sql_seed_json = values.get("sql_seed_data")
 
+                # Emit the canonical schema + SQL directly from final state, in the
+                # exact shape the frontend expects. This is the reliable delivery
+                # path — the mid-stream `updates` parsing is best-effort and will be
+                # tightened later.
+                if schema_json:
+                    yield _sse({
+                        "type": "result",
+                        "result_type": "SCHEMA",
+                        "content": {"schema_table": schema_json},
+                    })
+                if sql_table_json or sql_seed_json:
+                    yield _sse({
+                        "type": "result",
+                        "result_type": "SQL",
+                        "content": {
+                            "sql_table": sql_table_json or "",
+                            "sql_seed_data": sql_seed_json or "",
+                        },
+                    })
+
                 if final_text:
                     produced_response = True
                     yield _sse({"type": "done", "text": final_text})
 
-                # Persist structured outputs (existing async Celery task — unchanged).
+                # Persist structured outputs. Done synchronously — it's a single
+                # fast DB write and avoids requiring a running Celery worker +
+                # result backend (django_celery_results isn't migrated here).
                 if produced_response and (schema_json or sql_table_json or sql_seed_json):
                     save_schema_project.delay(
+                    # persist_schema_project(
+
                         generate_intent,
                         project.id,
                         schema_json,
