@@ -257,7 +257,7 @@ class SchemaProjectListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SchemaProject
-        fields = ["id", "name", "slug", "description"]
+        fields = ["id", "name", "slug", "description", "created_at", "updated_at"]
 
 
 class SchemaProjectDetailSerializer(serializers.ModelSerializer):
