@@ -33,7 +33,6 @@ from .prompt import (
     TEST_SQL_GENERATION_SYSTEM_PROMPT,
     TEST_TABLE_SCHEMA_SYSTEM_PROMPT,
 )
-from .serializers import MessageSerializer
 from .tasks import persist_schema_project, save_schema_project
 from .utils import generate_chat_title
 
@@ -45,6 +44,7 @@ api_key = settings.GROQ_API_KEY
 class SqlState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
     prompt: str
+    model: str
     valid_intent: bool
     generate: bool
     explain: bool
@@ -99,23 +99,59 @@ class SQLGeneration(BaseModel):
 class FinalMessage(BaseModel):
     message: str = Field(description="your reply to user prompt")
 
-schema_model = ChatGroq(
-    # model = "moonshotai/kimi-k2-instruct-0905",
-    model = "openai/gpt-oss-120b",
-    temperature=0.1,
-    max_tokens= 5000,
-    timeout=30,
-    api_key=api_key
+# ── Models ─────────────────────────────────────────────────────────
+# Models the schema agent exposes. Mirrors sql_agent.SUPPORTED_MODELS so the
+# shared frontend model-picker works for both agents. Each model is pre-bound
+# at import time into the 4 variants the graph nodes need: structured-output
+# models for the router / schema / sql nodes, plus a plain model for the
+# message node.
+SUPPORTED_MODELS = (
+    "openai/gpt-oss-120b",
+    "groq/compound",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "qwen/qwen3-32b",
 )
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+
+def _build_schema_model(model_name: str) -> ChatGroq:
+    return ChatGroq(
+        model=model_name,
+        temperature=0.1,
+        max_tokens=5000,
+        timeout=30,
+        api_key=api_key,
+    )
+
+
+def _build_model_bundle(model_name: str) -> dict:
+    base = _build_schema_model(model_name)
+    return {
+        "router": base.with_structured_output(RouterDecision),
+        "schema": base.with_structured_output(DatabaseSchema),
+        "sql": base.with_structured_output(SQLGeneration),
+        "plain": base,
+    }
+
+
+SCHEMA_LLMS: dict[str, dict] = {
+    name: _build_model_bundle(name) for name in SUPPORTED_MODELS
+}
+
+
+def _models_for(state: SqlState) -> dict:
+    """Pick the model bundle for the request's chosen model, defaulting if unknown."""
+    name = state.get("model") or DEFAULT_MODEL
+    return SCHEMA_LLMS.get(name) or SCHEMA_LLMS[DEFAULT_MODEL]
+
 
 # ============
 # Router Node
 # ============
 
-structured_router_model = schema_model.with_structured_output(RouterDecision,)
-
 def descision_node(state: SqlState):
 
+    structured_router_model = _models_for(state)["router"]
     user_prompt = state["prompt"]
     all_messages = state.get("messages", [])
     # recent_history = all_messages[-10:] if all_messages else []
@@ -158,12 +194,11 @@ def route_decision(state: SqlState) -> Literal["create_table_schema", "generate_
 # Schema Nodes
 # =============
 
-structured_schema_model = schema_model.with_structured_output(DatabaseSchema,)
-
 def create_table_schema(state: SqlState):
     """
     Generates or refines a table schema using structured output.
     """
+    structured_schema_model = _models_for(state)["schema"]
     prompt = state["prompt"]
     generate = state.get("generate")
     previous_schema = state.get("schema_table", "")
@@ -204,12 +239,11 @@ def create_table_schema(state: SqlState):
 # Sql Nodes
 # ===========
 
-structured_sql_model = schema_model.with_structured_output(SQLGeneration)
-
 def generate_sql_node(state: SqlState):
     """
     Final node that converts the approved JSON schema into raw SQL and seed data.
     """
+    structured_sql_model = _models_for(state)["sql"]
     prompt = state["prompt"]
     generate = state.get("generate")
     schema_table = state.get("schema_table", "")
@@ -257,7 +291,8 @@ def generate_sql_node(state: SqlState):
 # sql_reply = schema_model.with_structured_output(FinalMessage)
 
 def message_node(state: SqlState):
-    
+
+    plain_model = _models_for(state)["plain"]
     user_prompt = state["prompt"]
     explain = state.get("explain", False)
     generate = state.get("generate", False)
@@ -297,7 +332,7 @@ def message_node(state: SqlState):
     #     ]
 
     # result = sql_reply.invoke(messages_for_llm)
-    result = schema_model.invoke(
+    result = plain_model.invoke(
         [
             {"role": "system", "content": TEST_MESSAGE_SYSTEM_PROMPT},
             *recent_history,
@@ -385,11 +420,21 @@ class SchemaAgent(APIView):
         return HttpResponse("Hello, this is your SQL Schema AI, JARVIS.")
 
     def post(self, request):
-        serializer = MessageSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        query = serializer.validated_data["query"]
-        thread_id = serializer.validated_data.get("thread_id") or uuid4().hex
+        # Read the JSON body directly (same pattern as SqlAgent.post) — the
+        # old MessageSerializer had no `model` field.
+        query = request.data.get("query")
+        thread_id = request.data.get("thread_id") or uuid4().hex
         thread_id = str(thread_id)
+
+        if not query:
+            return Response(
+                {"error": "query is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Model defaults to DEFAULT_MODEL when omitted or unsupported.
+        requested_model = request.data.get("model") or DEFAULT_MODEL
+        model = requested_model if requested_model in SCHEMA_LLMS else DEFAULT_MODEL
 
         # Get or create the project up-front so we have a stable slug for the
         # checkpointer and a row for history listing. Empty projects (failed
@@ -419,7 +464,7 @@ class SchemaAgent(APIView):
                     })
 
                 for mode, data in schema_agent.stream(
-                    {"prompt": query},
+                    {"prompt": query, "model": model},
                     stream_mode=["messages", "updates"],
                     config=config,
                 ):
