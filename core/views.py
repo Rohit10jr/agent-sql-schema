@@ -148,44 +148,49 @@ def logout(request):
 @permission_classes([AllowAny])
 @throttle_classes([FivePerMinuteThrottle])
 def email_verify(request):
-    """Verify an account using uid/token pair and auto-login (return JWT tokens)."""
+    """Verify an account using a uid/token pair.
+
+    Email verification is intentionally **decoupled from session creation**:
+    the user may click the verification link on a different device from the
+    one they signed up on, and auto-issuing tokens here would log them in
+    where they weren't expecting it (and leave the signup device hanging).
+    The caller (frontend) shows a "verified — please log in" state and the
+    user logs in explicitly on the device they want to use.
+    """
     uid = request.data.get('uid')
     token = request.data.get('token')
-    user = None
 
     if not uid or not token:
-        return Response({"message": "UID and Token are required."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"success": False, "message": "UID and Token are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    if uid and token:
-        try:
-            uid_decoded = force_str(urlsafe_base64_decode(uid))
-            user = User.objects.get(pk=uid_decoded)
-        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            return Response({"message": "Invalid user ID."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        uid_decoded = force_str(urlsafe_base64_decode(uid))
+        user = User.objects.get(pk=uid_decoded)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        return Response(
+            {"success": False, "message": "Invalid user ID."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    if user and default_token_generator.check_token(user, token):
-        # Idempotent: if the user clicks the link twice, the second call still issues tokens.
-        if not user.email_verified:
-            user.is_active = True
-            user.email_verified = True
-            user.save()
+    if not default_token_generator.check_token(user, token):
+        return Response(
+            {"success": False, "message": "Invalid or expired token."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-        # Auto-login: issue JWT pair so the frontend can drop the user straight into the app.
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            "success": True,
-            "message": "Email verified successfully.",
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-            },
-        })
+    # Idempotent: clicking the link twice still returns success on the second click.
+    if not user.email_verified:
+        user.is_active = True
+        user.email_verified = True
+        user.save()
 
-    return Response({"message": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({
+        "success": True,
+        "message": "Email verified successfully. You can now log in.",
+    })
 
 
 @api_view(['POST'])
@@ -854,7 +859,6 @@ class UsageView(APIView):
         "hour":  {"days": 1,    "trunc_kind": "hour"},
         "day":   {"days": 30,   "trunc_kind": "day"},
         "month": {"days": 365,  "trunc_kind": "month"},
-        "year":  {"days": 365 * 5, "trunc_kind": "year"},
     }
 
     QUOTA = 1_000_000  # tokens — TODO: per-user override later
@@ -863,14 +867,14 @@ class UsageView(APIView):
         from datetime import timedelta
         from django.utils import timezone
         from django.db.models import Sum
-        from django.db.models.functions import TruncDate, TruncHour, TruncMonth, TruncYear
+        from django.db.models.functions import TruncDate, TruncHour, TruncMonth
         from core.models import TokenUsage
 
         granularity = request.query_params.get("granularity", "day")
         config = self.GRANULARITY_CONFIG.get(granularity)
         if config is None:
             return Response(
-                {"error": "granularity must be one of: hour, day, month, year"},
+                {"error": "granularity must be one of: hour, day, month"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -880,7 +884,6 @@ class UsageView(APIView):
             "hour":  TruncHour("created_at"),
             "day":   TruncDate("created_at"),
             "month": TruncMonth("created_at"),
-            "year":  TruncYear("created_at"),
         }
         trunc = trunc_map[config["trunc_kind"]]
 

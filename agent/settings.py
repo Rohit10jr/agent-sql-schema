@@ -166,7 +166,7 @@ AUTH_USER_MODEL = "core.CustomUser"
 # Default to SMTP. To preview emails in the runserver console during
 # development, set EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
 # in .env. Console mode prints the rendered email instead of sending.
-EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'localhost')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
