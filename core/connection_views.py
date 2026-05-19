@@ -14,6 +14,7 @@ from core.serializers import (
     FileConnectionCreateSerializer,
 )
 from core.services.connection import ConnectionError, ConnectionService
+from core.services.sample_data import provision_sample_connections
 
 logger = logging.getLogger(__name__)
 
@@ -166,3 +167,13 @@ class ConnectionRefreshView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"data": ConnectionOutSerializer(updated).data})
+
+
+class RestoreSampleConnectionsView(APIView):
+    """POST /api/connections/restore-samples/ — re-create any sample DB
+    connections the user previously deleted. Idempotent."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        created = provision_sample_connections(request.user)
+        return Response({"created": created}, status=status.HTTP_200_OK)

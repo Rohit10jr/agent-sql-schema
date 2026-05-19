@@ -162,6 +162,22 @@ SITE_ID = 1
 
 AUTH_USER_MODEL = "core.CustomUser"
 
+# ── Sample databases ───────────────────────────────────────────────
+# Read-only SQLite files shipped with the repo that every new user gets
+# automatically as Connection rows on signup. Designed as a registry so
+# adding a sample later is a one-line append. The file path is absolute
+# (resolved at provision time) — re-provisioning picks up any move.
+SAMPLE_DBS = [
+    {
+        "key": "netflix",
+        "name": "Netflix (sample)",
+        "database": "netflix",
+        "type": "sqlite",
+        "dialect": "sqlite",
+        "path": BASE_DIR / "samples" / "netflix.sqlite3",
+    },
+]
+
 # ── Email ──────────────────────────────────────────────────────────
 # Default to SMTP. To preview emails in the runserver console during
 # development, set EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
