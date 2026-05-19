@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
@@ -45,22 +46,17 @@ class SignupSerializer(serializers.ModelSerializer):
         validated_data.pop('password2')
         email = validated_data['email'].lower()
 
-        user = User.objects.create_user(
-            email=email,
-            first_name=validated_data.get('first_name', ''),
-            last_name=validated_data.get('last_name', ''),
-            password=validated_data['password1']
-        )
-                
-        # refresh = RefreshToken.for_user(user)
-        # user.tokens = {
-        #     'refresh': str(refresh),
-        #     'access': str(refresh.access_token),
-        # }
-        
-        user.is_active = True
-        user.email_verified = False
-        user.save()
+        with transaction.atomic():
+            user = User.objects.create_user(
+                email=email,
+                first_name=validated_data.get('first_name', ''),
+                last_name=validated_data.get('last_name', ''),
+                password=validated_data['password1']
+            )
+
+            user.is_active = True
+            user.email_verified = False
+            user.save()
 
         return user
 
@@ -257,7 +253,7 @@ class SchemaProjectListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SchemaProject
-        fields = ["id", "name", "slug", "description", "created_at", "updated_at"]
+        fields = ["id", "name", "slug", "description", "is_starred", "created_at", "updated_at"]
 
 
 class SchemaProjectDetailSerializer(serializers.ModelSerializer):
@@ -278,6 +274,7 @@ class SchemaProjectDetailSerializer(serializers.ModelSerializer):
             "schema_table",
             "sql_table",
             "sql_seed_data",
+            "sql_edited_manually",
             # "complete_json",
             "created_at",
             "updated_at",
@@ -285,6 +282,22 @@ class SchemaProjectDetailSerializer(serializers.ModelSerializer):
 
 
 class SchemaProjectUpdateSerializer(serializers.ModelSerializer):
+    # Accept the SQL / seed payload under the same client-facing names the
+    # detail serializer uses (sql_table, sql_seed_data) so the frontend doesn't
+    # have to know about the underlying `sql_json` / `seed_json` columns.
+    sql_table = serializers.JSONField(source="sql_json", required=False)
+    sql_seed_data = serializers.JSONField(source="seed_json", required=False)
+
     class Meta:
         model = SchemaProject
-        fields = ["name", "description"]
+        fields = ["name", "description", "is_starred", "sql_table", "sql_seed_data"]
+
+    def update(self, instance, validated_data):
+        # Detect a manual SQL edit: if the caller patched sql_json or seed_json,
+        # flip the flag on and clear the cached dialect variants (they were
+        # transpiled from the previous SQL and are now stale).
+        edited_sql = "sql_json" in validated_data or "seed_json" in validated_data
+        if edited_sql:
+            instance.sql_edited_manually = True
+            instance.variants = {}
+        return super().update(instance, validated_data)

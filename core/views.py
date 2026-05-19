@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -66,7 +67,7 @@ from dataclasses import dataclass
 from langgraph.runtime import Runtime
 from typing import Annotated, TypedDict, Union, Dict, Any
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from .models import ChatSession
+from .models import ChatSession, SchemaProject
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.decorators import api_view, throttle_classes
 from django.core.mail import EmailMultiAlternatives
@@ -358,16 +359,16 @@ def password_reset_confirm(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Set new password
-        user.set_password(password)
-        # logger.info(f"Password reset for user {user.email}")
-        # logger.info(f"Password reset for user {user.email}")
-        user.save()
+        # Atomic: the password change and the invalidation of existing refresh
+        # tokens must succeed together. Partial state (new password set but old
+        # tokens still valid) is a security issue.
+        with transaction.atomic():
+            user.set_password(password)
+            user.save()
 
-        # Blacklist all existing refresh tokens
-        for token in OutstandingToken.objects.filter(user=user):
-            BlacklistedToken.objects.get_or_create(token=token)
-        
+            for token in OutstandingToken.objects.filter(user=user):
+                BlacklistedToken.objects.get_or_create(token=token)
+
         return Response(
             {"message": "Password reset successful."},
             status=status.HTTP_200_OK
@@ -739,6 +740,7 @@ class ChatListView(APIView):
             {
                 "thread_id": c.thread_id,
                 "title": c.title,
+                "is_starred": c.is_starred,
                 "created_at": c.created_at
             }
             for c in chats
@@ -749,23 +751,36 @@ class ChatListView(APIView):
 class ChatDetailView(APIView):
 
     def patch(self, request, thread_id):
+        # Accept any subset of {title, is_starred}. At least one must be present.
         title = request.data.get("title")
+        is_starred = request.data.get("is_starred")
 
-        if not title:
+        if title is None and is_starred is None:
             return Response(
-                {"error": "Title is required"},
+                {"error": "At least one of 'title' or 'is_starred' is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             chat = ChatSession.objects.get(thread_id=thread_id, user=request.user)
-            chat.title = title
+
+            if title is not None:
+                if not title:
+                    return Response(
+                        {"error": "Title cannot be empty"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                chat.title = title
+
+            if is_starred is not None:
+                chat.is_starred = bool(is_starred)
+
             chat.save()
 
             return Response({
-                "message": "Title updated",
-                "thread_id": thread_id,
-                "title": title
+                "thread_id": chat.thread_id,
+                "title": chat.title,
+                "is_starred": chat.is_starred,
             })
 
         except ChatSession.DoesNotExist:
@@ -791,6 +806,61 @@ class ChatDetailView(APIView):
                 {"error": "Chat not found or access denied"},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class BulkDeleteNonStarredView(APIView):
+    """DELETE /api/cleanup/non-starred/ — hard-delete every non-starred chat
+    AND every non-starred schema project belonging to the caller. Clears the
+    corresponding LangGraph checkpointer threads (chats and schemas use
+    independent checkpointers) so message history doesn't linger in the
+    checkpointer DB.
+
+    Returns {"count": N} — total items removed (chats + schemas).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Snapshot identifiers before any deletion so we still know what to
+        # clean from the checkpointer even if the ORM delete races.
+        chat_thread_ids = list(
+            ChatSession.objects
+            .filter(user=request.user, is_starred=False)
+            .values_list("thread_id", flat=True)
+        )
+
+        schema_slugs = list(
+            SchemaProject.objects
+            .filter(user=request.user, is_starred=False)
+            .values_list("slug", flat=True)
+        )
+
+        # Checkpointer cleanup is best-effort and runs on a separate connection
+        # pool — a single failure shouldn't block the rest of the bulk delete.
+        for tid in chat_thread_ids:
+            try:
+                pg_checkpointer.delete_thread(tid)
+            except Exception:
+                log.exception("Failed to clear chat checkpointer for thread %s", tid)
+
+        # Schema agent has its own checkpointer instance — import lazily to
+        # avoid a circular import at module load.
+        from core.schema_agent import pg_checkpointer as schema_checkpointer
+        for slug in schema_slugs:
+            try:
+                schema_checkpointer.delete_thread(slug)
+            except Exception:
+                log.exception("Failed to clear schema checkpointer for slug %s", slug)
+
+        # Atomic: both bulk deletes succeed together or neither does. Keeps the
+        # user's sidebar in a consistent state if one query unexpectedly fails.
+        with transaction.atomic():
+            ChatSession.objects.filter(user=request.user, is_starred=False).delete()
+            SchemaProject.objects.filter(user=request.user, is_starred=False).delete()
+
+        return Response({"count": len(chat_thread_ids) + len(schema_slugs)})
 
 
 def get_clean_chat_history(raw_messages, reverse=True):

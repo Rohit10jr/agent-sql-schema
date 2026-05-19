@@ -51,6 +51,11 @@ urlpatterns = [
     path("threads/", views.ChatListView.as_view()),
     path("threads/<str:thread_id>/", views.ChatDetailView.as_view()),
     # path("threads/<str:thread_id>/delete/", views.ChatDeleteView.as_view()),
+
+    # Bulk cleanup — removes every non-starred chat AND non-starred schema
+    # project for the caller. Lives outside /threads/ now because it spans
+    # both resources.
+    path("cleanup/non-starred/", views.BulkDeleteNonStarredView.as_view()),
     path('aichat/', views.AiChatView.as_view(), name='AiChatView'),
     
     # Connections
