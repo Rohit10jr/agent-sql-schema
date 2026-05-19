@@ -74,6 +74,7 @@ from django.utils.html import strip_tags
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from core.utils import generate_chat_title
 from core.services.email import send_verification_email, send_password_reset_email
+from core.services.sample_data import provision_sample_connections
 # from rest_framework.throttling import UserRateThrottle
 
 
@@ -103,6 +104,17 @@ def signup(request):
     serializer = SignupSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
+
+        # Seed read-only sample DBs (Netflix etc.) so the user can try the
+        # agent immediately without connecting their own database. Wrapped in
+        # try/except — signup must never fail because provisioning hiccuped.
+        try:
+            provision_sample_connections(user)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to provision sample connections for user %s", user.pk,
+            )
 
         try:
             send_verification_email(user)

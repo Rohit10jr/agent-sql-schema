@@ -1,4 +1,5 @@
 import logging
+import os
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -14,6 +15,7 @@ from core.serializers import (
     FileConnectionCreateSerializer,
 )
 from core.services.connection import ConnectionError, ConnectionService
+from core.services.sample_data import provision_sample_connections
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,26 @@ class ConnectView(APIView):
         )
 
 
+# Accepted file extensions per upload type. Mirrored in the frontend dialog
+# (FILE_TYPE_EXTENSIONS in connection-form-dialog.tsx). Keep both in sync.
+FILE_EXTENSIONS = {
+    "sqlite":   (".sqlite", ".db"),
+    "csv":      (".csv",),
+    "excel":    (".xlsx", ".xlsm"),
+    "sas7bdat": (".sas7bdat",),
+}
+
+
+def _extension_of(filename: str) -> str:
+    return os.path.splitext(filename or "")[1].lower()
+
+
 class FileConnectView(APIView):
-    """POST /api/connect/file/ — Creates a new database connection from an uploaded SQLite, CSV, Excel, or SAS file by converting it into a usable database source."""
+    """POST /api/connect/file/ — create a connection from an uploaded
+    SQLite, CSV, Excel (.xlsx/.xlsm), or SAS file. The non-SQLite formats
+    are converted to a local SQLite database. Returns 400 on extension
+    mismatch so the user gets a clear message instead of a parser crash.
+    """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
@@ -54,6 +74,31 @@ class FileConnectView(APIView):
         if not file or not file_type or not name:
             return Response(
                 {"error": "file, type, and name are all required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        allowed = FILE_EXTENSIONS.get(file_type)
+        if allowed is None:
+            return Response(
+                {
+                    "error": (
+                        f"Unsupported file type: {file_type}. "
+                        f"Use one of: {', '.join(FILE_EXTENSIONS)}."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ext = _extension_of(file.name)
+        if ext not in allowed:
+            pretty_type = "Excel" if file_type == "excel" else file_type.upper()
+            return Response(
+                {
+                    "error": (
+                        f"{pretty_type} files must be {' or '.join(allowed)} "
+                        f"(got {ext or 'no extension'})."
+                    ),
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -81,12 +126,6 @@ class FileConnectView(APIView):
             elif file_type == "sas7bdat":
                 connection = ConnectionService.create_sas_connection(
                     user=request.user, file_obj=file, name=name,
-                )
-
-            else:
-                return Response(
-                    {"error": f"Unsupported file type: {file_type}. Use sqlite, csv, excel, or sas7bdat."},
-                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
         except ConnectionError as e:
@@ -166,3 +205,13 @@ class ConnectionRefreshView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"data": ConnectionOutSerializer(updated).data})
+
+
+class RestoreSampleConnectionsView(APIView):
+    """POST /api/connections/restore-samples/ — re-create any sample DB
+    connections the user previously deleted. Idempotent."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        created = provision_sample_connections(request.user)
+        return Response({"created": created}, status=status.HTTP_200_OK)

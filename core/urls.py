@@ -11,7 +11,14 @@ from . import schema_views
 from .schema_views import SchemaProjectListView, SchemaProjectDetailView, SchemaProjectUpdateSerializer, GetSQLVariantView
 from .schema_agent import SchemaAgent 
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
-from .connection_views import ConnectView, FileConnectView, ConnectionListView, ConnectionDetailView, ConnectionRefreshView
+from .connection_views import (
+    ConnectView,
+    FileConnectView,
+    ConnectionListView,
+    ConnectionDetailView,
+    ConnectionRefreshView,
+    RestoreSampleConnectionsView,
+)
 from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView 
 from .sql_agent import SqlAgent
 
@@ -50,6 +57,7 @@ urlpatterns = [
     path('connect/', ConnectView.as_view(), name='connect'),
     path('connect/file/', FileConnectView.as_view(), name='connect_file'),
     path('connections/', ConnectionListView.as_view(), name='connections'),
+    path('connections/restore-samples/', RestoreSampleConnectionsView.as_view(), name='connections_restore_samples'),
     path('connection/<uuid:connection_id>/', ConnectionDetailView.as_view(), name='connection_detail'),
     path('connection/<uuid:connection_id>/refresh/', ConnectionRefreshView.as_view(), name='connection_refresh'),
 
