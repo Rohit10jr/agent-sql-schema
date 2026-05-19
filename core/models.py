@@ -118,6 +118,7 @@ class ChatSession(models.Model):
         null=True,
         blank=True,
     )
+    is_starred = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

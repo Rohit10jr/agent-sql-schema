@@ -49,6 +49,9 @@ urlpatterns = [
     # generic chat session
     path("threads/<str:thread_id>/history/", views.ChatHistoryView.as_view()),
     path("threads/", views.ChatListView.as_view()),
+    # Must be registered BEFORE the <str:thread_id> route so "non-starred"
+    # isn't parsed as a thread_id.
+    path("threads/non-starred/", views.ChatBulkDeleteNonStarredView.as_view()),
     path("threads/<str:thread_id>/", views.ChatDetailView.as_view()),
     # path("threads/<str:thread_id>/delete/", views.ChatDeleteView.as_view()),
     path('aichat/', views.AiChatView.as_view(), name='AiChatView'),

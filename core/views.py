@@ -740,6 +740,7 @@ class ChatListView(APIView):
             {
                 "thread_id": c.thread_id,
                 "title": c.title,
+                "is_starred": c.is_starred,
                 "created_at": c.created_at
             }
             for c in chats
@@ -750,23 +751,36 @@ class ChatListView(APIView):
 class ChatDetailView(APIView):
 
     def patch(self, request, thread_id):
+        # Accept any subset of {title, is_starred}. At least one must be present.
         title = request.data.get("title")
+        is_starred = request.data.get("is_starred")
 
-        if not title:
+        if title is None and is_starred is None:
             return Response(
-                {"error": "Title is required"},
+                {"error": "At least one of 'title' or 'is_starred' is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             chat = ChatSession.objects.get(thread_id=thread_id, user=request.user)
-            chat.title = title
+
+            if title is not None:
+                if not title:
+                    return Response(
+                        {"error": "Title cannot be empty"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                chat.title = title
+
+            if is_starred is not None:
+                chat.is_starred = bool(is_starred)
+
             chat.save()
 
             return Response({
-                "message": "Title updated",
-                "thread_id": thread_id,
-                "title": title
+                "thread_id": chat.thread_id,
+                "title": chat.title,
+                "is_starred": chat.is_starred,
             })
 
         except ChatSession.DoesNotExist:
@@ -792,6 +806,42 @@ class ChatDetailView(APIView):
                 {"error": "Chat not found or access denied"},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class ChatBulkDeleteNonStarredView(APIView):
+    """DELETE /api/threads/non-starred/ — hard-delete every non-starred chat
+    belonging to the caller. Also clears the corresponding LangGraph checkpointer
+    threads so message history doesn't linger in the checkpointer DB.
+
+    Returns {"count": N} — the number of chats removed.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        thread_ids = list(
+            ChatSession.objects
+            .filter(user=request.user, is_starred=False)
+            .values_list("thread_id", flat=True)
+        )
+
+        # Checkpointer cleanup is best-effort and runs on a separate connection
+        # pool — a single thread that fails to clear shouldn't block the rest of
+        # the bulk delete.
+        import logging
+        log = logging.getLogger(__name__)
+        for tid in thread_ids:
+            try:
+                pg_checkpointer.delete_thread(tid)
+            except Exception:
+                log.exception("Failed to clear checkpointer for thread %s", tid)
+
+        deleted, _ = (
+            ChatSession.objects
+            .filter(user=request.user, is_starred=False)
+            .delete()
+        )
+
+        return Response({"count": deleted})
 
 
 def get_clean_chat_history(raw_messages, reverse=True):
