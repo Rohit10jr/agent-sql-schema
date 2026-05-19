@@ -566,9 +566,7 @@ class SchemaAgent(APIView):
                 # fast DB write and avoids requiring a running Celery worker +
                 # result backend (django_celery_results isn't migrated here).
                 if produced_response and (schema_json or sql_table_json or sql_seed_json):
-                    save_schema_project.delay(
-                    # persist_schema_project(
-
+                    persist_schema_project(
                         generate_intent,
                         project.id,
                         schema_json,

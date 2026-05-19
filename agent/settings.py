@@ -54,9 +54,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     # 'django_filters',
-    # 'django_celery_results',
-    # 'rest_framework.authtoken',
     'django_celery_results',
+    # 'rest_framework.authtoken',
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
 
