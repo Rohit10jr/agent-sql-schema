@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
@@ -45,22 +46,17 @@ class SignupSerializer(serializers.ModelSerializer):
         validated_data.pop('password2')
         email = validated_data['email'].lower()
 
-        user = User.objects.create_user(
-            email=email,
-            first_name=validated_data.get('first_name', ''),
-            last_name=validated_data.get('last_name', ''),
-            password=validated_data['password1']
-        )
-                
-        # refresh = RefreshToken.for_user(user)
-        # user.tokens = {
-        #     'refresh': str(refresh),
-        #     'access': str(refresh.access_token),
-        # }
-        
-        user.is_active = True
-        user.email_verified = False
-        user.save()
+        with transaction.atomic():
+            user = User.objects.create_user(
+                email=email,
+                first_name=validated_data.get('first_name', ''),
+                last_name=validated_data.get('last_name', ''),
+                password=validated_data['password1']
+            )
+
+            user.is_active = True
+            user.email_verified = False
+            user.save()
 
         return user
 

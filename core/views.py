@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -358,16 +359,16 @@ def password_reset_confirm(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Set new password
-        user.set_password(password)
-        # logger.info(f"Password reset for user {user.email}")
-        # logger.info(f"Password reset for user {user.email}")
-        user.save()
+        # Atomic: the password change and the invalidation of existing refresh
+        # tokens must succeed together. Partial state (new password set but old
+        # tokens still valid) is a security issue.
+        with transaction.atomic():
+            user.set_password(password)
+            user.save()
 
-        # Blacklist all existing refresh tokens
-        for token in OutstandingToken.objects.filter(user=user):
-            BlacklistedToken.objects.get_or_create(token=token)
-        
+            for token in OutstandingToken.objects.filter(user=user):
+                BlacklistedToken.objects.get_or_create(token=token)
+
         return Response(
             {"message": "Password reset successful."},
             status=status.HTTP_200_OK
