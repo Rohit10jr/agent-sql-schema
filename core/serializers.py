@@ -274,6 +274,7 @@ class SchemaProjectDetailSerializer(serializers.ModelSerializer):
             "schema_table",
             "sql_table",
             "sql_seed_data",
+            "sql_edited_manually",
             # "complete_json",
             "created_at",
             "updated_at",
@@ -281,6 +282,22 @@ class SchemaProjectDetailSerializer(serializers.ModelSerializer):
 
 
 class SchemaProjectUpdateSerializer(serializers.ModelSerializer):
+    # Accept the SQL / seed payload under the same client-facing names the
+    # detail serializer uses (sql_table, sql_seed_data) so the frontend doesn't
+    # have to know about the underlying `sql_json` / `seed_json` columns.
+    sql_table = serializers.JSONField(source="sql_json", required=False)
+    sql_seed_data = serializers.JSONField(source="seed_json", required=False)
+
     class Meta:
         model = SchemaProject
-        fields = ["name", "description", "is_starred"]
+        fields = ["name", "description", "is_starred", "sql_table", "sql_seed_data"]
+
+    def update(self, instance, validated_data):
+        # Detect a manual SQL edit: if the caller patched sql_json or seed_json,
+        # flip the flag on and clear the cached dialect variants (they were
+        # transpiled from the previous SQL and are now stale).
+        edited_sql = "sql_json" in validated_data or "seed_json" in validated_data
+        if edited_sql:
+            instance.sql_edited_manually = True
+            instance.variants = {}
+        return super().update(instance, validated_data)

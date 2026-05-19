@@ -261,6 +261,11 @@ class SchemaProject(models.Model):
     seed_json = models.JSONField(null=True, blank=True)
     variants = models.JSONField(default=dict, blank=True)
     is_starred = models.BooleanField(default=False, db_index=True)
+    # True when the user has hand-edited sql_json / seed_json since the last
+    # agent regeneration. UI uses this to show a "manually edited" badge on
+    # the Tables / ER diagram views (which are derived from schema_json and
+    # may have diverged from the edited SQL).
+    sql_edited_manually = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
