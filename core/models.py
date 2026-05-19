@@ -260,6 +260,7 @@ class SchemaProject(models.Model):
     sql_json = models.JSONField(null=True, blank=True)
     seed_json = models.JSONField(null=True, blank=True)
     variants = models.JSONField(default=dict, blank=True)
+    is_starred = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
