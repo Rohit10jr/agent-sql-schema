@@ -585,6 +585,17 @@ class SchemaAgent(APIView):
                     except Exception:
                         logger.exception("Schema-agent title generation failed for %s", thread_id)
 
+                # Mirror the conversation text into the search index. Best-effort
+                # — a failure here must never break the response stream.
+                if produced_response:
+                    try:
+                        from core.services.search_index import reindex_thread
+                        reindex_thread(request.user, "schema", thread_id, messages)
+                    except Exception:
+                        logger.exception(
+                            "Failed to index schema thread %s for search", thread_id
+                        )
+
             except Exception as e:
                 logger.exception("Schema-agent stream failed")
                 yield _sse({"type": "error", "error": str(e)})

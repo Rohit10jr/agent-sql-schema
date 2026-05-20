@@ -67,7 +67,7 @@ from dataclasses import dataclass
 from langgraph.runtime import Runtime
 from typing import Annotated, TypedDict, Union, Dict, Any
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from .models import ChatSession, SchemaProject
+from .models import ChatSession, ConversationMessage, SchemaProject
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.decorators import api_view, throttle_classes
 from django.core.mail import EmailMultiAlternatives
@@ -795,6 +795,9 @@ class ChatDetailView(APIView):
 
             pg_checkpointer.delete_thread(thread_id)
             chat.delete()
+            ConversationMessage.objects.filter(
+                user=request.user, agent="sql", thread_id=thread_id,
+            ).delete()
 
             return Response({
                 "message": "Chat deleted",
@@ -859,6 +862,10 @@ class BulkDeleteNonStarredView(APIView):
         with transaction.atomic():
             ChatSession.objects.filter(user=request.user, is_starred=False).delete()
             SchemaProject.objects.filter(user=request.user, is_starred=False).delete()
+            # Drop the search-index rows for everything that was removed.
+            ConversationMessage.objects.filter(
+                user=request.user, thread_id__in=chat_thread_ids + schema_slugs,
+            ).delete()
 
         return Response({"count": len(chat_thread_ids) + len(schema_slugs)})
 
@@ -1006,3 +1013,129 @@ class UsageView(APIView):
             "quota": self.QUOTA,
             "percent_used": percent_used,
         })
+
+
+# ── Chat search ─────────────────────────────────────────────────────
+
+def _search_snippet(text: str, query: str, radius: int = 40) -> str:
+    """Return a short window of `text` around the first occurrence of `query`."""
+    idx = text.lower().find(query.lower())
+    if idx == -1:
+        # Full-text matched on a lexeme that isn't a literal substring (stemming,
+        # stop-word handling) — fall back to the head of the message.
+        head = text[: radius * 2].strip()
+        return head + ("…" if len(text) > radius * 2 else "")
+    start = max(0, idx - radius)
+    end = min(len(text), idx + len(query) + radius)
+    return (
+        ("…" if start > 0 else "")
+        + text[start:end].strip()
+        + ("…" if end < len(text) else "")
+    )
+
+
+class ChatSearchView(APIView):
+    """GET /api/search/?q=... — search the caller's SQL chats and schema
+    projects by title and by message content (Postgres full-text).
+
+    Each result identifies a thread:
+        {agent: "sql"|"schema", thread_id, title, matched_text|null, rank}
+    Title matches carry rank 1.0 so they sort above content matches.
+    """
+    permission_classes = [IsAuthenticated]
+
+    MIN_QUERY_LEN = 2
+    TITLE_LIMIT = 20
+    CONTENT_LIMIT = 60
+
+    def get(self, request):
+        from django.db.models import Q
+        from django.contrib.postgres.search import SearchQuery, SearchRank
+        from core.models import ConversationMessage
+
+        query = (request.query_params.get("q") or "").strip()
+        if len(query) < self.MIN_QUERY_LEN:
+            return Response({"results": []})
+
+        user = request.user
+        results = []
+        seen = set()  # (agent, thread_id) already represented by a title match
+
+        # ── 1. Title matches (substring, cheap) ───────────────────────
+        chats = ChatSession.objects.filter(
+            user=user, title__icontains=query,
+        ).order_by("-created_at")[: self.TITLE_LIMIT]
+        for chat in chats:
+            seen.add(("sql", chat.thread_id))
+            results.append({
+                "agent": "sql",
+                "thread_id": chat.thread_id,
+                "title": chat.title or "Untitled chat",
+                "matched_text": None,
+                "rank": 1.0,
+            })
+
+        projects = SchemaProject.objects.filter(user=user).filter(
+            Q(name__icontains=query) | Q(description__icontains=query),
+        ).order_by("-updated_at")[: self.TITLE_LIMIT]
+        for project in projects:
+            seen.add(("schema", project.slug))
+            results.append({
+                "agent": "schema",
+                "thread_id": project.slug,
+                "title": project.name or "Untitled schema",
+                "matched_text": None,
+                "rank": 1.0,
+            })
+
+        # ── 2. Message-content matches (full-text, ranked) ────────────
+        search_query = SearchQuery(query, config="english")
+        hits = (
+            ConversationMessage.objects
+            .filter(user=user, search_vector=search_query)
+            .annotate(rank=SearchRank("search_vector", search_query))
+            .order_by("-rank")[: self.CONTENT_LIMIT]
+        )
+
+        # Collapse to the best-ranked message per thread.
+        best = {}
+        for hit in hits:
+            key = (hit.agent, hit.thread_id)
+            if key not in seen and key not in best:
+                best[key] = hit
+
+        # Resolve titles in bulk; drop hits whose thread was since deleted.
+        sql_ids = [tid for (agent, tid) in best if agent == "sql"]
+        schema_ids = [tid for (agent, tid) in best if agent == "schema"]
+        sql_titles = dict(
+            ChatSession.objects
+            .filter(user=user, thread_id__in=sql_ids)
+            .values_list("thread_id", "title")
+        )
+        schema_titles = dict(
+            SchemaProject.objects
+            .filter(user=user, slug__in=schema_ids)
+            .values_list("slug", "name")
+        )
+
+        for (agent, thread_id), hit in best.items():
+            if agent == "sql":
+                title = sql_titles.get(thread_id)
+                fallback = "Untitled chat"
+            else:
+                title = schema_titles.get(thread_id)
+                fallback = "Untitled schema"
+            if title is None and thread_id not in (
+                sql_titles if agent == "sql" else schema_titles
+            ):
+                continue  # thread deleted or not owned — skip orphan index row
+            results.append({
+                "agent": agent,
+                "thread_id": thread_id,
+                "title": title or fallback,
+                "matched_text": _search_snippet(hit.text, query),
+                "rank": float(hit.rank),
+            })
+
+        results.sort(key=lambda r: r["rank"], reverse=True)
+        return Response({"results": results})

@@ -69,6 +69,9 @@ urlpatterns = [
     # Token usage
     path('usage/', views.UsageView.as_view(), name='usage'),
 
+    # Chat search (full-text across SQL chats + schema projects)
+    path('search/', views.ChatSearchView.as_view(), name='chat_search'),
+
     # SQL Conversations
     path('sql-agent/', SqlAgent.as_view(), name='sql_agent'),
     path('sql-conversation/', SQLConversationCreateView.as_view(), name='sql_conversation_create'),

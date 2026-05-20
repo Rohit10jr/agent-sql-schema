@@ -734,6 +734,17 @@ class SqlAgent(APIView):
                     chat.save(update_fields=["title"])
                     yield _sse({"type": "title", "thread_id": thread_id, "title": title})
 
+                # Mirror the conversation text into the search index. Best-effort
+                # — a failure here must never break the response stream.
+                if produced_response:
+                    try:
+                        from core.services.search_index import reindex_thread
+                        reindex_thread(request.user, "sql", thread_id, final_messages)
+                    except Exception:
+                        logger.exception(
+                            "Failed to index SQL thread %s for search", thread_id
+                        )
+
             except Exception as e:
                 logger.exception("SQL agent stream failed")
                 yield _sse({"type": "error", "error": str(e)})
