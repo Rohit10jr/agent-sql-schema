@@ -47,6 +47,7 @@ USAGE  (from `python manage.py shell`)
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, TypedDict
@@ -87,8 +88,8 @@ EMBED_DIMS = 1536
 
 # Summarization fires when the live message list exceeds this many tokens.
 # Lower it to make summarization easy to trigger while testing.
-MAX_TOKENS_BEFORE_SUMMARY = 100
-KEEP_RECENT_MESSAGES = 6                # never summarize away the freshest N
+MAX_TOKENS_BEFORE_SUMMARY = 2500
+KEEP_RECENT_MESSAGES = 8                # never summarize away the freshest N
 RECALL_LIMIT = 3                        # memories auto-injected per turn
 
 
@@ -171,6 +172,27 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Credential-like patterns. Memory is for durable, shareable facts about a
+# user — never secrets. This is a code-level backstop in addition to the
+# "never save secrets" instruction in the system prompt (a prompt is guidance,
+# not enforcement). Heuristic, not exhaustive.
+_SECRET_PATTERNS = (
+    re.compile(
+        r"\b(pass(word|wd)?|secret|api[_-]?key|access[_-]?key|token|bearer|credential)s?\b\s*[:=]",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),        # OpenAI-style API keys
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),           # AWS access key id
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), # GitHub tokens
+    re.compile(r"\b[A-Fa-f0-9]{32,}\b"),           # long hex blobs (keys/hashes)
+)
+
+
+def _looks_like_secret(text: str) -> bool:
+    """True if the text appears to contain a credential. Heuristic guard."""
+    return any(pattern.search(text or "") for pattern in _SECRET_PATTERNS)
+
+
 # ── Graph state ─────────────────────────────────────────────────────────────
 class LTMState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
@@ -191,6 +213,8 @@ def create_memory(content: str, category: str = "general") -> str:
     preferences, recurring goals, constraints. Do NOT save transient chatter.
     category is a free label, e.g. "profile", "preferences", "facts".
     """
+    if _looks_like_secret(content):
+        return "Refused: that looks like a credential or secret — not saved."
     user_id = get_runtime(Context).context.user_id
     memory_id = uuid4().hex
     get_store().put(
@@ -225,6 +249,8 @@ def update_memory(memory_id: str, content: str) -> str:
     Use when a previously stored fact has changed (e.g. the user switched
     their preferred database). Get the id from search_memory first.
     """
+    if _looks_like_secret(content):
+        return "Refused: that looks like a credential or secret — not saved."
     user_id = get_runtime(Context).context.user_id
     namespace = _memory_namespace(user_id)
     existing = get_store().get(namespace, memory_id)
@@ -244,7 +270,10 @@ def delete_memory(memory_id: str) -> str:
     Get the id from search_memory first.
     """
     user_id = get_runtime(Context).context.user_id
-    get_store().delete(_memory_namespace(user_id), memory_id)
+    namespace = _memory_namespace(user_id)
+    if get_store().get(namespace, memory_id) is None:
+        return f"No memory with id [{memory_id}] — nothing to delete."
+    get_store().delete(namespace, memory_id)
     return f"Deleted memory [{memory_id}]."
 
 
@@ -337,13 +366,13 @@ def recall_memories(state: LTMState, runtime: Runtime[Context]) -> dict:
     if not hits:
         return {"recalled": ""}
 
-    lines = []
-    for hit in hits:
-        content = hit.value.get("content", "")
-        if hit.score is not None:
-            lines.append(f"- {content}  (id={hit.key}, relevance={hit.score:.2f})")
-        else:
-            lines.append(f"- {content}  (id={hit.key})")
+    # The id IS surfaced to the LLM — it needs it to call update/delete_memory.
+    # Relevance scores are kept for debugging only, not shown to the model.
+    logger.debug(
+        "recall hits: %s",
+        [(h.key, round(h.score, 3) if h.score is not None else None) for h in hits],
+    )
+    lines = [f"- {h.value.get('content', '')}  (id={h.key})" for h in hits]
     return {"recalled": "\n".join(lines)}
 
 
