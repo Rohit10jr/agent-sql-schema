@@ -3,6 +3,8 @@ import uuid
 
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 from django.utils import timezone
 from django.conf import settings
 
@@ -178,6 +180,48 @@ class TokenUsage(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id} · {self.model_name} · {self.total_tokens}t"
+
+
+class ConversationMessage(models.Model):
+    """Denormalized, searchable copy of conversation text.
+
+    The real messages live in the LangGraph checkpointer blobs, which the Django
+    ORM cannot query. After each agent turn we mirror the human/assistant text
+    into this table so chat search can run Postgres full-text queries against it.
+    One row per message; the rows for a thread are rebuilt wholesale on each turn
+    (see core.services.search_index.reindex_thread).
+    """
+
+    class Agent(models.TextChoices):
+        SQL = "sql", "SQL agent"
+        SCHEMA = "schema", "Schema agent"
+
+    class Role(models.TextChoices):
+        USER = "user", "User"
+        ASSISTANT = "assistant", "Assistant"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="conversation_messages",
+    )
+    agent = models.CharField(max_length=10, choices=Agent.choices)
+    # ChatSession.thread_id for the SQL agent, SchemaProject.slug for the schema agent.
+    thread_id = models.CharField(max_length=64, db_index=True)
+    role = models.CharField(max_length=10, choices=Role.choices)
+    text = models.TextField()
+    search_vector = SearchVectorField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            GinIndex(fields=["search_vector"]),
+            models.Index(fields=["user", "agent", "thread_id"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.agent}:{self.thread_id} [{self.role}]"
 
 
 

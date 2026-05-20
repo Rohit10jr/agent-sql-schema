@@ -17,7 +17,8 @@ from rest_framework.views import APIView
 
 # ── LangChain / LangGraph ──────────────────────────────────────────
 from langchain_community.utilities.sql_database import SQLDatabase
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
@@ -36,6 +37,7 @@ from typing_extensions import TypedDict
 from core.models import ChatSession, Connection, Result, TokenUsage
 from core.services.connection import ConnectionService
 from core.services.sql_prompt import build_system_prompt
+from core.services import memory as ltm
 from core.utils import generate_chat_title
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,8 @@ GROQ_API_KEY = settings.GROQ_API_KEY
 
 class SQLAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
+    summary: str      # rolling summary of turns compacted out of `messages`
+    recalled: str     # long-term memories injected for this turn
 
 
 @dataclass
@@ -455,10 +459,17 @@ def call_model(state: SQLAgentState, runtime: Runtime[UserContext]) -> dict:
     # Fall back to default if the user passed an unknown / unsupported model.
     llm_with_tools = LLMS_WITH_TOOLS.get(model_name) or LLMS_WITH_TOOLS[DEFAULT_MODEL]
 
-    if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=build_system_prompt(dialect=dialect))] + messages
+    # Build a fresh system prompt every call: base + rolling summary + recalled
+    # long-term memories. Never persisted in `messages` — rebuilt from state
+    # each time so summary / memory updates always take effect.
+    system_prompt = build_system_prompt(dialect=dialect)
+    if state.get("summary"):
+        system_prompt += f"\n\n## Summary of earlier conversation\n{state['summary']}"
+    if state.get("recalled"):
+        system_prompt += f"\n\n## What you remember about this user\n{state['recalled']}"
 
-    response = llm_with_tools.invoke(messages)
+    conversation = [m for m in messages if not isinstance(m, SystemMessage)]
+    response = llm_with_tools.invoke([SystemMessage(content=system_prompt), *conversation])
     return {"messages": [response]}
 
 
@@ -469,17 +480,102 @@ def should_continue(state: SQLAgentState) -> str:
     return END
 
 
+# ── Long-term memory + summarization ───────────────────────────────
+
+# Summarization fires when the live message list exceeds this token budget;
+# the oldest complete turns are folded into `state["summary"]` and dropped.
+_MAX_TOKENS_BEFORE_SUMMARY = 3000
+_KEEP_RECENT_MESSAGES = 8
+
+_summarizer_llm = ChatGroq(
+    model=DEFAULT_MODEL,
+    temperature=0.0,
+    max_tokens=512,
+    api_key=GROQ_API_KEY,
+    max_retries=2,
+)
+
+
+def _latest_user_text(messages: list[BaseMessage]) -> str:
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return str(message.content or "")
+    return ""
+
+
+def _safe_cut_index(messages: list[BaseMessage], min_recent: int) -> int:
+    """Index to summarize up to — always a HumanMessage (turn) boundary, so a
+    tool call is never split from its result. 0 → nothing safe to summarize."""
+    target = max(0, len(messages) - min_recent)
+    for i in range(target, len(messages)):
+        if isinstance(messages[i], HumanMessage):
+            return i
+    return 0
+
+
+def _render_messages(messages: list[BaseMessage]) -> str:
+    return "\n".join(
+        f"{m.__class__.__name__.replace('Message', '')}: {m.content}"
+        for m in messages
+    )
+
+
+def summarize_conversation(state: SQLAgentState) -> dict:
+    """Compact old turns into a rolling summary once the thread gets long."""
+    messages = state["messages"]
+    if count_tokens_approximately(messages) <= _MAX_TOKENS_BEFORE_SUMMARY:
+        return {}
+    cut = _safe_cut_index(messages, _KEEP_RECENT_MESSAGES)
+    if cut <= 0:
+        return {}
+
+    older = messages[:cut]
+    previous = state.get("summary", "")
+    prompt = (
+        "Maintain a running summary of a data/SQL assistant conversation. Fold "
+        "the new messages into the existing summary. Keep it concise but keep "
+        "the user's questions, what was found, and any decisions.\n\n"
+        f"EXISTING SUMMARY:\n{previous or '(none yet)'}\n\n"
+        f"NEW MESSAGES:\n{_render_messages(older)}"
+    )
+    try:
+        new_summary = str(_summarizer_llm.invoke(prompt).content)
+    except Exception:
+        logger.exception("SQL agent summarization failed")
+        return {}
+
+    # RemoveMessage(id=...) drops those messages via the add_messages reducer.
+    return {
+        "summary": new_summary,
+        "messages": [RemoveMessage(id=m.id) for m in older],
+    }
+
+
+def recall_memories(state: SQLAgentState, runtime: Runtime[UserContext]) -> dict:
+    """Pull long-term memories relevant to the latest user message."""
+    query = _latest_user_text(state["messages"])
+    memories = ltm.recall(runtime.context.user_id, query)
+    return {"recalled": ltm.format_for_prompt(memories)}
+
+
+# ── Graph ──────────────────────────────────────────────────────────
+
 sql_graph = StateGraph(SQLAgentState, context_schema=UserContext)
+sql_graph.add_node("summarize", summarize_conversation)
+sql_graph.add_node("recall", recall_memories)
 sql_graph.add_node("agent", call_model)
 sql_graph.add_node("tools", ToolNode(tools))
-sql_graph.add_edge(START, "agent")
+
+sql_graph.add_edge(START, "summarize")
+sql_graph.add_edge("summarize", "recall")
+sql_graph.add_edge("recall", "agent")
 sql_graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
 sql_graph.add_edge("tools", "agent")
 
 _pool = ConnectionPool(conninfo=DB_URI, min_size=1, max_size=3)
 _checkpointer = PostgresSaver(_pool)
 # _checkpointer.setup()  # run once on first deploy to create checkpoint tables
-sql_agent = sql_graph.compile(checkpointer=_checkpointer)
+sql_agent = sql_graph.compile(checkpointer=_checkpointer, store=ltm.store)
 
 
 # ── SSE helpers ────────────────────────────────────────────────────
@@ -733,6 +829,29 @@ class SqlAgent(APIView):
                     chat.title = title
                     chat.save(update_fields=["title"])
                     yield _sse({"type": "title", "thread_id": thread_id, "title": title})
+
+                # Mirror the conversation text into the search index. Best-effort
+                # — a failure here must never break the response stream.
+                if produced_response:
+                    try:
+                        from core.services.search_index import reindex_thread
+                        reindex_thread(request.user, "sql", thread_id, final_messages)
+                    except Exception:
+                        logger.exception(
+                            "Failed to index SQL thread %s for search", thread_id
+                        )
+
+                # Extract durable user facts from this turn into long-term
+                # memory. Best-effort, post-stream — never blocks the response.
+                if produced_response:
+                    try:
+                        ltm.extract_and_store(
+                            request.user.id, query, str(last.content),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Memory extraction failed for thread %s", thread_id
+                        )
 
             except Exception as e:
                 logger.exception("SQL agent stream failed")
