@@ -445,7 +445,7 @@ def password_change(request):
 
 
 # =================
-# --- CHAT VIEW ---
+# --- AI CHAT VIEW ---
 # =================
 
 DB_URI = settings.DB_URI
