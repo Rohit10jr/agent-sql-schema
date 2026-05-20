@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import (
 from . import views
 from . import sql_views
 from . import schema_views
+from . import memory_views
 from .schema_views import SchemaProjectListView, SchemaProjectDetailView, SchemaProjectUpdateSerializer, GetSQLVariantView
 from .schema_agent import SchemaAgent 
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
@@ -71,6 +72,10 @@ urlpatterns = [
 
     # Chat search (full-text across SQL chats + schema projects)
     path('search/', views.ChatSearchView.as_view(), name='chat_search'),
+
+    # Long-term memory (user-facing CRUD over what the agents remember)
+    path('memories/', memory_views.MemoryListCreateView.as_view(), name='memories'),
+    path('memories/<str:memory_id>/', memory_views.MemoryDetailView.as_view(), name='memory_detail'),
 
     # SQL Conversations
     path('sql-agent/', SqlAgent.as_view(), name='sql_agent'),
