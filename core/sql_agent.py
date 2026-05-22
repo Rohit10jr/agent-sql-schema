@@ -312,10 +312,13 @@ DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
 def _build_llm(model_name: str) -> ChatGroq:
+    # max_tokens is reserved in full against Groq's per-minute token budget
+    # (prompt + max_tokens must fit the tier's TPM limit). Keep it to a
+    # realistic answer size, not a generous "just in case" ceiling.
     return ChatGroq(
         model=model_name,
         temperature=0.1,
-        max_tokens=4000,
+        max_tokens=2500,
         timeout=60,
         api_key=GROQ_API_KEY,
         max_retries=3,
