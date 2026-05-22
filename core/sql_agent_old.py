@@ -1,4 +1,4 @@
-﻿# ΓöÇΓöÇ stdlib ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── stdlib ─────────────────────────────────────────────────────────
 import json
 import logging
 import re
@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Optional
 from uuid import uuid4
 
-# ΓöÇΓöÇ Django / DRF ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Django / DRF ───────────────────────────────────────────────────
 from django.conf import settings
 from django.http import StreamingHttpResponse
 from rest_framework import status
@@ -15,7 +15,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-# ΓöÇΓöÇ LangChain / LangGraph ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── LangChain / LangGraph ──────────────────────────────────────────
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -27,12 +27,12 @@ from langchain_core.tools import InjectedToolArg, tool
 from langchain.tools import ToolRuntime
 from langgraph.runtime import Runtime
 
-# ΓöÇΓöÇ Other third-party ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Other third-party ──────────────────────────────────────────────
 from psycopg_pool import ConnectionPool
 from sqlalchemy import text
 from typing_extensions import TypedDict
 
-# ΓöÇΓöÇ Local ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Local ──────────────────────────────────────────────────────────
 from core.models import ChatSession, Connection, Result, TokenUsage
 from core.services.connection import ConnectionService
 from core.services.sql_prompt import build_system_prompt
@@ -44,7 +44,7 @@ DB_URI = settings.DB_URI
 GROQ_API_KEY = settings.GROQ_API_KEY
 
 
-# ΓöÇΓöÇ State & Context ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── State & Context ────────────────────────────────────────────────
 
 class SQLAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
@@ -56,7 +56,7 @@ class UserContext:
     db: SQLDatabase
     connection: Connection
     secure_data: bool = False
-    # Model name (Groq model id) ΓÇö picked by the user per-request.
+    # Model name (Groq model id) — picked by the user per-request.
     # Pre-initialised LLMs are looked up by this key in LLMS_WITH_TOOLS.
     model: str = ""
     # Most recent chart-bound query result, populated by run_sql_query when
@@ -64,7 +64,7 @@ class UserContext:
     last_chart_data: Optional[dict] = None
 
 
-# ΓöÇΓöÇ Chart helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Chart helpers ──────────────────────────────────────────────────
 
 class ChartType(StrEnum):
     bar = "bar"
@@ -120,7 +120,7 @@ def fill_chart_with_data(chart_json: str, columns: list, rows: list, chart_type:
     return json.dumps(config)
 
 
-# ΓöÇΓöÇ SQL helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── SQL helpers ────────────────────────────────────────────────────
 
 FORBIDDEN_KEYWORDS = {
     "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
@@ -173,7 +173,7 @@ def execute_sql_query(
     return {"columns": columns, "rows": truncated_rows}
 
 
-# ΓöÇΓöÇ Tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Tools ──────────────────────────────────────────────────────────
 
 # Marks the runtime param as caller-injected so LLM schema generation skips it.
 # ToolNode still auto-injects it because it dispatches off the underlying Runtime type.
@@ -247,7 +247,7 @@ def run_sql_query(
                     f"Columns: {columns}\n"
                     f"Column types: {data_types}\n"
                     f"Number of rows: {len(rows)}\n"
-                    f"(Data hidden for security ΓÇö user can see the results)"
+                    f"(Data hidden for security — user can see the results)"
                 )
             return "Query executed successfully. No rows returned."
 
@@ -293,9 +293,9 @@ def generate_chart(
     return f"CHART_JSON:{skeleton}"
 
 
-# ΓöÇΓöÇ LLM & Graph (compiled once, reused per request) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── LLM & Graph (compiled once, reused per request) ────────────────
 
-# Models exposed to users ΓÇö pre-initialised at import time so requests don't
+# Models exposed to users — pre-initialised at import time so requests don't
 # pay the cost of constructing ChatGroq + bind_tools every call. Add a model
 # here to expose it; remove and it disappears from the picker.
 SUPPORTED_MODELS = (
@@ -321,17 +321,17 @@ def _build_llm(model_name: str) -> ChatGroq:
 tools = [list_tables, get_table_schema, run_sql_query, generate_chart]
 
 
-# ΓöÇΓöÇ Guardrails ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Guardrails ─────────────────────────────────────────────────────
 #
 # Catches abusive / unsafe / out-of-scope user input *before* it reaches the
-# LLM. Destructive SQL is NOT checked here ΓÇö sql_toolkit.validate_read_only
+# LLM. Destructive SQL is NOT checked here — sql_toolkit.validate_read_only
 # owns that and inspects the actual query, which is more accurate than
 # pattern-matching natural language.
 #
 # Each category has its own pattern list + refusal message. Patterns are
 # matched as whole words (\b boundaries, case-insensitive) to avoid the
 # Scunthorpe problem (e.g. "class" wouldn't trip an "ass" entry).
-# Categories are checked in priority order: threats ΓåÆ hate ΓåÆ sexual ΓåÆ
+# Categories are checked in priority order: threats → hate → sexual →
 # prompt-injection. Threats first so users in crisis see the helpline.
 
 # THREAT_PATTERNS = (
@@ -482,7 +482,7 @@ _checkpointer = PostgresSaver(_pool)
 sql_agent = sql_graph.compile(checkpointer=_checkpointer)
 
 
-# ΓöÇΓöÇ SSE helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── SSE helpers ────────────────────────────────────────────────────
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
@@ -500,8 +500,8 @@ def _extract_token_content(token: Any) -> tuple[str, str]:
     """Returns (kind, text). `kind` is 'reasoning' or 'text'.
 
     Groq / OpenAI o-series stream `content_blocks` of two shapes:
-      { type: 'reasoning', reasoning: '...' }  ΓåÆ kind='reasoning'
-      { type: 'text',      text: '...'      }  ΓåÆ kind='text'
+      { type: 'reasoning', reasoning: '...' }  → kind='reasoning'
+      { type: 'text',      text: '...'      }  → kind='text'
     """
     if hasattr(token, "content_blocks") and token.content_blocks:
         block = token.content_blocks[0]
@@ -520,7 +520,7 @@ def _extract_token_content(token: Any) -> tuple[str, str]:
         return "text", str(token.content or "")
     return "text", ""
 
-# ΓöÇΓöÇ View ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── View ───────────────────────────────────────────────────────────
 
 class SqlAgent(APIView):
     permission_classes = [IsAuthenticated]
@@ -602,7 +602,7 @@ class SqlAgent(APIView):
                     context=context,
                     version="v2",
                 ):
-                    # ΓöÇΓöÇΓöÇ 1. MESSAGES MODE ΓÇö token + reasoning streaming ΓöÇΓöÇΓöÇΓöÇΓöÇ
+                    # ─── 1. MESSAGES MODE — token + reasoning streaming ─────
                     if mode == "messages":
                         token, metadata = data
                         kind, content = _extract_token_content(token)
@@ -613,7 +613,7 @@ class SqlAgent(APIView):
                                 "node": metadata.get("langgraph_node", "unknown"),
                                 "text": content,
                             })
-                    # ΓöÇΓöÇΓöÇ 2. UPDATES MODE ΓÇö node completions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                    # ─── 2. UPDATES MODE — node completions ─────────────────
                     elif mode == "updates":
                         for node_name, state_update in data.items():
                             messages = (
@@ -680,7 +680,7 @@ class SqlAgent(APIView):
                                         continue
 
                                     # Charts ship a full Chart.js JSON in `content` and are
-                                    # rendered by the frontend ΓÇö never truncate those.
+                                    # rendered by the frontend — never truncate those.
                                     sse_content = content if name == "generate_chart" else content[:500]
                                     yield _sse({
                                         "type": "tool_result",
@@ -717,7 +717,7 @@ class SqlAgent(APIView):
                                             "content": {"chartjs_json": chart_json},
                                         })
 
-                # ΓöÇΓöÇΓöÇ 3. FINAL ΓÇö done event + title for new threads ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                # ─── 3. FINAL — done event + title for new threads ─────────
                 final_state = sql_agent.get_state(config)
                 final_messages = final_state.values.get("messages", []) if final_state else []
                 last = final_messages[-1] if final_messages else None
@@ -726,7 +726,7 @@ class SqlAgent(APIView):
                     produced_response = True
                     yield _sse({"type": "done", "text": last.content})
 
-                # Only title-generate on success ΓÇö failed runs get cleaned up below.
+                # Only title-generate on success — failed runs get cleaned up below.
                 if new_thread and produced_response:
                     title_input = f"User: {query}\nAssistant: {last.content}"
                     title = generate_chat_title(title_input)
@@ -735,7 +735,7 @@ class SqlAgent(APIView):
                     yield _sse({"type": "title", "thread_id": thread_id, "title": title})
 
                 # Mirror the conversation text into the search index. Best-effort
-                # ΓÇö a failure here must never break the response stream.
+                # — a failure here must never break the response stream.
                 if produced_response:
                     try:
                         from core.services.search_index import reindex_thread

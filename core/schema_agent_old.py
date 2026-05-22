@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 import operator
 import os
@@ -99,7 +99,7 @@ class SQLGeneration(BaseModel):
 class FinalMessage(BaseModel):
     message: str = Field(description="your reply to user prompt")
 
-# ΓöÇΓöÇ Models ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Models ─────────────────────────────────────────────────────────
 # Models the schema agent exposes. Mirrors sql_agent.SUPPORTED_MODELS so the
 # shared frontend model-picker works for both agents. Each model is pre-bound
 # at import time into the 4 variants the graph nodes need: structured-output
@@ -410,7 +410,7 @@ class SchemaAgent(APIView):
     """Streaming endpoint for the schema agent.
 
     Mirrors the SSE shape used by `SqlAgent` so the frontend can share its
-    streaming utilities. The underlying graph nodes are unchanged ΓÇö this view
+    streaming utilities. The underlying graph nodes are unchanged — this view
     just consumes the graph's stream events and translates them into SSE.
     """
 
@@ -420,7 +420,7 @@ class SchemaAgent(APIView):
         return HttpResponse("Hello, this is your SQL Schema AI, JARVIS.")
 
     def post(self, request):
-        # Read the JSON body directly (same pattern as SqlAgent.post) ΓÇö the
+        # Read the JSON body directly (same pattern as SqlAgent.post) — the
         # old MessageSerializer had no `model` field.
         query = request.data.get("query")
         thread_id = request.data.get("thread_id") or uuid4().hex
@@ -468,7 +468,7 @@ class SchemaAgent(APIView):
                     stream_mode=["messages", "updates"],
                     config=config,
                 ):
-                    # ΓöÇΓöÇΓöÇ 1. MESSAGES MODE ΓÇö token streaming (message_node only) ΓöÇΓöÇ
+                    # ─── 1. MESSAGES MODE — token streaming (message_node only) ──
                     if mode == "messages":
                         token, metadata = data
                         node = metadata.get("langgraph_node", "")
@@ -487,7 +487,7 @@ class SchemaAgent(APIView):
                                 "text": text,
                             })
 
-                    # ΓöÇΓöÇΓöÇ 2. UPDATES MODE ΓÇö node-level progress + structured results ΓöÇΓöÇ
+                    # ─── 2. UPDATES MODE — node-level progress + structured results ──
                     elif mode == "updates":
                         for node_name, state_update in data.items():
                             if node_name not in emitted_nodes:
@@ -501,7 +501,7 @@ class SchemaAgent(APIView):
                             if not isinstance(state_update, dict):
                                 continue
 
-                            # Schema generation ΓåÆ ship the structured tables JSON.
+                            # Schema generation → ship the structured tables JSON.
                             schema_table = state_update.get("schema_table")
                             if schema_table:
                                 yield _sse({
@@ -510,7 +510,7 @@ class SchemaAgent(APIView):
                                     "content": {"schema_table": schema_table},
                                 })
 
-                            # SQL generation ΓåÆ ship CREATE + INSERT strings.
+                            # SQL generation → ship CREATE + INSERT strings.
                             sql_table = state_update.get("sql_table")
                             sql_seed = state_update.get("sql_seed_data")
                             if sql_table or sql_seed:
@@ -523,7 +523,7 @@ class SchemaAgent(APIView):
                                     },
                                 })
 
-                # ΓöÇΓöÇΓöÇ 3. FINAL ΓÇö pull canonical state, persist, emit done + title ΓöÇΓöÇ
+                # ─── 3. FINAL — pull canonical state, persist, emit done + title ──
                 final_state = schema_agent.get_state(config)
                 values = final_state.values if final_state else {}
                 messages = values.get("messages", [])
@@ -540,7 +540,7 @@ class SchemaAgent(APIView):
 
                 # Emit the canonical schema + SQL directly from final state, in the
                 # exact shape the frontend expects. This is the reliable delivery
-                # path ΓÇö the mid-stream `updates` parsing is best-effort and will be
+                # path — the mid-stream `updates` parsing is best-effort and will be
                 # tightened later.
                 if schema_json:
                     yield _sse({
@@ -562,7 +562,7 @@ class SchemaAgent(APIView):
                     produced_response = True
                     yield _sse({"type": "done", "text": final_text})
 
-                # Persist structured outputs. Done synchronously ΓÇö it's a single
+                # Persist structured outputs. Done synchronously — it's a single
                 # fast DB write and avoids requiring a running Celery worker +
                 # result backend (django_celery_results isn't migrated here).
                 if produced_response and (schema_json or sql_table_json or sql_seed_json):
@@ -586,7 +586,7 @@ class SchemaAgent(APIView):
                         logger.exception("Schema-agent title generation failed for %s", thread_id)
 
                 # Mirror the conversation text into the search index. Best-effort
-                # ΓÇö a failure here must never break the response stream.
+                # — a failure here must never break the response stream.
                 if produced_response:
                     try:
                         from core.services.search_index import reindex_thread
