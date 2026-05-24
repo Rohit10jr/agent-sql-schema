@@ -62,8 +62,9 @@ SUPPORTED_MODELS = (
     "meta-llama/llama-4-scout-17b-16e-instruct",
     "qwen/qwen3-32b",
 )
-DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-SUMMARIZE_MODEL = "openai/gpt-oss-120b"
+# DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+SUMMARIZE_MODEL = "qwen/qwen3-32b"
 
 MAX_TOKENS_BEFORE_SUMMARY = 2500
 KEEP_RECENT_MESSAGES = 8
