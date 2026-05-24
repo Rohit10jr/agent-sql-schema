@@ -10,7 +10,8 @@ from . import sql_views
 from . import schema_views
 from . import memory_views
 from .schema_views import SchemaProjectListView, SchemaProjectDetailView, SchemaProjectUpdateSerializer, GetSQLVariantView
-from .schema_agent import SchemaAgent 
+from .schema_agent import SchemaAgent  # agentic design — kept loaded; schema_views imports from this module
+from .schema_agent_hybrid import SchemaAgentHybrid  # hybrid workflow design
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
 from .connection_views import (
     ConnectView,
@@ -86,7 +87,8 @@ urlpatterns = [
 
     # SCHEMA Agent
     # path("variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
-    path('schema-agent/', SchemaAgent.as_view(), name='schema_view'),
+    # path('schema-agent/', SchemaAgent.as_view(), name='schema_view'),         # agentic
+    path('schema-agent/', SchemaAgentHybrid.as_view(), name='schema_view'),    # hybrid workflow
     path("schema-projects/", SchemaProjectListView.as_view(), name="ai-project-list"),
     path("schema-project/<slug:slug>/", SchemaProjectDetailView.as_view(), name="ai-project-detail"),
     path("schema-variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
