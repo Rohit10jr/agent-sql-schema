@@ -13,6 +13,7 @@ Key methods:
     ConnectionService.get_sql_database(connection) - Create a live SQLDatabase for querying.
 """
 
+import io
 import logging
 import sqlite3
 import tempfile
@@ -225,13 +226,76 @@ class ConnectionService:
         dsn = f"sqlite:///{file_path.absolute()}"
         return ConnectionService.create_connection(user, dsn=dsn, name=name, connection_type="sqlite", is_sample=is_sample)
 
+    # Encoding fallback chain for CSV. Order matters:
+    #   utf-8       — modern default; most exports from databases / web tools.
+    #   utf-8-sig   — UTF-8 with BOM; common from Excel "Save as CSV UTF-8".
+    #   cp1252      — Windows Western Europe; legacy Excel exports (é = 0xe9).
+    #   latin-1     — Last resort; never raises UnicodeDecodeError on any bytes,
+    #                 so we're guaranteed to read something even for unknown
+    #                 encodings (characters may render imperfectly but the data
+    #                 lands in SQLite intact).
+    CSV_ENCODINGS = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
+
+    @staticmethod
+    def _read_csv_robust(file_obj) -> pd.DataFrame:
+        """Read a CSV file trying common encodings in order."""
+        # Buffer once — pd.read_csv consumes the stream and we may need to retry.
+        raw = file_obj.read()
+        last_error: Exception | None = None
+        for encoding in ConnectionService.CSV_ENCODINGS:
+            try:
+                return pd.read_csv(io.BytesIO(raw), encoding=encoding)
+            except UnicodeDecodeError as e:
+                last_error = e
+                continue
+        # Unreachable in practice — latin-1 accepts any byte sequence.
+        raise ConnectionError(
+            f"Could not decode CSV in any supported encoding "
+            f"({', '.join(ConnectionService.CSV_ENCODINGS)}): {last_error}"
+        )
+
+    @staticmethod
+    def _read_excel_all_sheets(file_obj, filename: str) -> dict[str, pd.DataFrame]:
+        """Read every sheet of an Excel file, picking the engine by extension."""
+        ext = Path(filename or "").suffix.lower()
+        # Buffer so we can retry with a different engine if needed.
+        raw = file_obj.read()
+
+        if ext in (".xlsx", ".xlsm"):
+            engine = "openpyxl"
+        elif ext == ".xls":
+            engine = "xlrd"
+        elif ext == ".xlsb":
+            engine = "pyxlsb"
+        else:
+            # Unknown extension — let pandas guess.
+            engine = None
+
+        try:
+            return pd.read_excel(io.BytesIO(raw), sheet_name=None, engine=engine)
+        except ImportError as e:
+            # Engine package isn't installed in this environment.
+            installs = {"xlrd": "xlrd", "pyxlsb": "pyxlsb"}
+            pkg = installs.get(engine or "")
+            hint = f" Run: pip install {pkg}" if pkg else ""
+            raise ConnectionError(
+                f"This Excel format ({ext}) requires an extra package that "
+                f"isn't installed.{hint}"
+            ) from e
+        except Exception as e:
+            # openpyxl on .xls gives a confusing zip error; rewrite to be useful.
+            raise ConnectionError(
+                f"Could not read Excel file ({ext or 'unknown extension'}): {e}"
+            ) from e
+
     @staticmethod
     def create_csv_connection(user, file_obj, name: str) -> Connection:
         """Convert a CSV file to SQLite and create a connection."""
         file_path = ConnectionService._generate_sqlite_path()
 
+        df = ConnectionService._read_csv_robust(file_obj)
+
         conn = sqlite3.connect(file_path)
-        df = pd.read_csv(file_obj)
         table_name = name.lower().replace(" ", "_")
         df.to_sql(table_name, conn, if_exists="replace", index=False)
         conn.commit()
@@ -246,10 +310,13 @@ class ConnectionService:
         Each sheet becomes a separate table."""
         file_path = ConnectionService._generate_sqlite_path()
 
+        # Django's UploadedFile exposes the original filename via `.name`.
+        filename = getattr(file_obj, "name", "") or ""
+        sheets = ConnectionService._read_excel_all_sheets(file_obj, filename)
+
         conn = sqlite3.connect(file_path)
-        sheets = pd.read_excel(file_obj, sheet_name=None, engine="openpyxl")
         for sheet_name, df in sheets.items():
-            table_name = sheet_name.lower().replace(" ", "_")
+            table_name = str(sheet_name).lower().replace(" ", "_")
             df.to_sql(table_name, conn, if_exists="replace", index=False)
         conn.commit()
         conn.close()

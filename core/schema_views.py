@@ -93,7 +93,14 @@ class SchemaProjectDetailView(RetrieveUpdateDestroyAPIView):
     def perform_destroy(self, instance):
         """Delete the project AND clear its LangGraph checkpoint so the thread is fully gone."""
         slug = instance.slug
+        user = instance.user
         instance.delete()
+
+        from .models import ConversationMessage
+        ConversationMessage.objects.filter(
+            user=user, agent="schema", thread_id=slug,
+        ).delete()
+
         try:
             # Imported lazily to avoid circular import at module load.
             from .schema_agent import pg_checkpointer

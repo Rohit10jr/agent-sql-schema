@@ -17,8 +17,7 @@ from rest_framework.views import APIView
 
 # ── LangChain / LangGraph ──────────────────────────────────────────
 from langchain_community.utilities.sql_database import SQLDatabase
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage
-from langchain_core.messages.utils import count_tokens_approximately
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
@@ -35,11 +34,8 @@ from typing_extensions import TypedDict
 
 # ── Local ──────────────────────────────────────────────────────────
 from core.models import ChatSession, Connection, Result, TokenUsage
-from core.errors import classify_error
 from core.services.connection import ConnectionService
 from core.services.sql_prompt import build_system_prompt
-from core.services import memory as ltm
-from core.services import run_registry
 from core.utils import generate_chat_title
 
 logger = logging.getLogger(__name__)
@@ -52,8 +48,6 @@ GROQ_API_KEY = settings.GROQ_API_KEY
 
 class SQLAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
-    summary: str      # rolling summary of turns compacted out of `messages`
-    recalled: str     # long-term memories injected for this turn
 
 
 @dataclass
@@ -314,13 +308,10 @@ DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
 def _build_llm(model_name: str) -> ChatGroq:
-    # max_tokens is reserved in full against Groq's per-minute token budget
-    # (prompt + max_tokens must fit the tier's TPM limit). Keep it to a
-    # realistic answer size, not a generous "just in case" ceiling.
     return ChatGroq(
         model=model_name,
         temperature=0.1,
-        max_tokens=2500,
+        max_tokens=4000,
         timeout=60,
         api_key=GROQ_API_KEY,
         max_retries=3,
@@ -464,17 +455,10 @@ def call_model(state: SQLAgentState, runtime: Runtime[UserContext]) -> dict:
     # Fall back to default if the user passed an unknown / unsupported model.
     llm_with_tools = LLMS_WITH_TOOLS.get(model_name) or LLMS_WITH_TOOLS[DEFAULT_MODEL]
 
-    # Build a fresh system prompt every call: base + rolling summary + recalled
-    # long-term memories. Never persisted in `messages` — rebuilt from state
-    # each time so summary / memory updates always take effect.
-    system_prompt = build_system_prompt(dialect=dialect)
-    if state.get("summary"):
-        system_prompt += f"\n\n## Summary of earlier conversation\n{state['summary']}"
-    if state.get("recalled"):
-        system_prompt += f"\n\n## What you remember about this user\n{state['recalled']}"
+    if not messages or not isinstance(messages[0], SystemMessage):
+        messages = [SystemMessage(content=build_system_prompt(dialect=dialect))] + messages
 
-    conversation = [m for m in messages if not isinstance(m, SystemMessage)]
-    response = llm_with_tools.invoke([SystemMessage(content=system_prompt), *conversation])
+    response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
 
 
@@ -485,103 +469,17 @@ def should_continue(state: SQLAgentState) -> str:
     return END
 
 
-# ── Long-term memory + summarization ───────────────────────────────
-
-# Summarization fires when the live message list exceeds this token budget;
-# the oldest complete turns are folded into `state["summary"]` and dropped.
-_MAX_TOKENS_BEFORE_SUMMARY = 3000
-_KEEP_RECENT_MESSAGES = 8
-
-_summarizer_llm = ChatGroq(
-    model=DEFAULT_MODEL,
-    temperature=0.0,
-    max_tokens=512,
-    timeout=60,
-    api_key=GROQ_API_KEY,
-    max_retries=3,
-)
-
-
-def _latest_user_text(messages: list[BaseMessage]) -> str:
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            return str(message.content or "")
-    return ""
-
-
-def _safe_cut_index(messages: list[BaseMessage], min_recent: int) -> int:
-    """Index to summarize up to — always a HumanMessage (turn) boundary, so a
-    tool call is never split from its result. 0 → nothing safe to summarize."""
-    target = max(0, len(messages) - min_recent)
-    for i in range(target, len(messages)):
-        if isinstance(messages[i], HumanMessage):
-            return i
-    return 0
-
-
-def _render_messages(messages: list[BaseMessage]) -> str:
-    return "\n".join(
-        f"{m.__class__.__name__.replace('Message', '')}: {m.content}"
-        for m in messages
-    )
-
-
-def summarize_conversation(state: SQLAgentState) -> dict:
-    """Compact old turns into a rolling summary once the thread gets long."""
-    messages = state["messages"]
-    if count_tokens_approximately(messages) <= _MAX_TOKENS_BEFORE_SUMMARY:
-        return {}
-    cut = _safe_cut_index(messages, _KEEP_RECENT_MESSAGES)
-    if cut <= 0:
-        return {}
-
-    older = messages[:cut]
-    previous = state.get("summary", "")
-    prompt = (
-        "Maintain a running summary of a data/SQL assistant conversation. Fold "
-        "the new messages into the existing summary. Keep it concise but keep "
-        "the user's questions, what was found, and any decisions.\n\n"
-        f"EXISTING SUMMARY:\n{previous or '(none yet)'}\n\n"
-        f"NEW MESSAGES:\n{_render_messages(older)}"
-    )
-    try:
-        new_summary = str(_summarizer_llm.invoke(prompt).content)
-    except Exception:
-        logger.exception("SQL agent summarization failed")
-        return {}
-
-    # RemoveMessage(id=...) drops those messages via the add_messages reducer.
-    return {
-        "summary": new_summary,
-        "messages": [RemoveMessage(id=m.id) for m in older],
-    }
-
-
-def recall_memories(state: SQLAgentState, runtime: Runtime[UserContext]) -> dict:
-    """Pull long-term memories relevant to the latest user message."""
-    query = _latest_user_text(state["messages"])
-    memories = ltm.recall(runtime.context.user_id, query)
-    return {"recalled": ltm.format_for_prompt(memories)}
-
-
-# ── Graph ──────────────────────────────────────────────────────────
-
 sql_graph = StateGraph(SQLAgentState, context_schema=UserContext)
-sql_graph.add_node("summarize", summarize_conversation)
-sql_graph.add_node("recall", recall_memories)
 sql_graph.add_node("agent", call_model)
 sql_graph.add_node("tools", ToolNode(tools))
-
-sql_graph.add_edge(START, "summarize")
-sql_graph.add_edge("summarize", "recall")
-sql_graph.add_edge("recall", "agent")
+sql_graph.add_edge(START, "agent")
 sql_graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
 sql_graph.add_edge("tools", "agent")
 
 _pool = ConnectionPool(conninfo=DB_URI, min_size=1, max_size=3)
 _checkpointer = PostgresSaver(_pool)
 # _checkpointer.setup()  # run once on first deploy to create checkpoint tables
-sql_agent = sql_graph.compile(checkpointer=_checkpointer, store=ltm.store)
+sql_agent = sql_graph.compile(checkpointer=_checkpointer)
 
 
 # ── SSE helpers ────────────────────────────────────────────────────
@@ -677,25 +575,6 @@ class SqlAgent(APIView):
         except Exception as e:
             return Response({"error": f"Failed to connect: {e}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Reject a second POST on the same thread while a run is in flight.
-        # Frontend reads the existing run_id and decides whether to cancel + retry.
-        run_id = uuid4().hex
-        try:
-            handle = run_registry.register(
-                run_id=run_id,
-                user_id=user_id,
-                agent="sql",
-                thread_id=thread_id,
-            )
-        except run_registry.ConcurrentRunError as e:
-            return Response(
-                {
-                    "error": "A run is already in flight on this thread",
-                    "run_id": e.existing.run_id,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
         context = UserContext(
             user_id=user_id,
             db=db,
@@ -707,7 +586,6 @@ class SqlAgent(APIView):
         def stream_generator():
             last_run_result_id: Optional[Any] = None  # link CHART_GENERATION_RESULT -> SQL_QUERY_RUN_RESULT
             produced_response = False  # any AIMessage content this turn? gates ChatSession cleanup on failure
-            was_cancelled = False
 
             try:
                 if new_thread:
@@ -717,9 +595,6 @@ class SqlAgent(APIView):
                         "connection_id": str(connection.id),
                     })
 
-                # Tell the client the run_id so it can target POST /runs/<id>/cancel/.
-                yield _sse({"type": "run_started", "run_id": run_id})
-
                 for mode, data in sql_agent.stream(
                     {"messages": [HumanMessage(content=query)]},
                     stream_mode=["messages", "updates"],
@@ -727,15 +602,6 @@ class SqlAgent(APIView):
                     context=context,
                     version="v2",
                 ):
-                    # Cooperative cancellation: check between super-step events.
-                    # The agent→tools loop can leave orphan tool_calls — repair
-                    # before yielding so the next turn doesn't fail.
-                    if handle.cancel_event.is_set():
-                        was_cancelled = True
-                        run_registry.repair_orphan_tool_calls(sql_agent, config)
-                        yield _sse({"type": "cancelled", "run_id": run_id})
-                        break
-
                     # ─── 1. MESSAGES MODE — token + reasoning streaming ─────
                     if mode == "messages":
                         token, metadata = data
@@ -852,11 +718,6 @@ class SqlAgent(APIView):
                                         })
 
                 # ─── 3. FINAL — done event + title for new threads ─────────
-                # Skipped on cancel: `cancelled` SSE has already been emitted
-                # and any orphan tool_calls have been repaired.
-                if was_cancelled:
-                    return
-
                 final_state = sql_agent.get_state(config)
                 final_messages = final_state.values.get("messages", []) if final_state else []
                 last = final_messages[-1] if final_messages else None
@@ -884,42 +745,15 @@ class SqlAgent(APIView):
                             "Failed to index SQL thread %s for search", thread_id
                         )
 
-                # Extract durable user facts from this turn into long-term
-                # memory. Best-effort, post-stream — never blocks the response.
-                if produced_response:
-                    try:
-                        ltm.extract_and_store(
-                            request.user.id, query, str(last.content),
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Memory extraction failed for thread %s", thread_id
-                        )
-
             except Exception as e:
-                info = classify_error(e)
-                logger.exception(
-                    "sql_agent_stream_failed",
-                    extra={
-                        "run_id": run_id,
-                        "user_id": user_id,
-                        "thread_id": thread_id,
-                        "agent": "sql",
-                        "model": model,
-                        "error_code": info.code,
-                        "error_class": type(e).__name__,
-                        "retryable": info.retryable,
-                    },
-                )
-                yield _sse(info.to_sse(run_id=run_id))
+                logger.exception("SQL agent stream failed")
+                yield _sse({"type": "error", "error": str(e)})
 
             finally:
-                run_registry.unregister(run_id)
-
                 # If this was a brand-new chat and the agent never produced a real
                 # response, drop the empty ChatSession so it doesn't clutter the
-                # sidebar. Skip on cancel — the user may want to retry on the same thread.
-                if new_thread and not produced_response and not was_cancelled:
+                # sidebar. Runs even on client disconnect.
+                if new_thread and not produced_response:
                     try:
                         deleted, _ = ChatSession.objects.filter(
                             thread_id=thread_id, user=request.user

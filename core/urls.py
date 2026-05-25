@@ -8,12 +8,22 @@ from rest_framework_simplejwt.views import (
 from . import views
 from . import sql_views
 from . import schema_views
+from . import memory_views
 from .schema_views import SchemaProjectListView, SchemaProjectDetailView, SchemaProjectUpdateSerializer, GetSQLVariantView
-from .schema_agent import SchemaAgent 
+from .schema_agent import SchemaAgent  # agentic design — kept loaded; schema_views imports from this module
+from .schema_agent_hybrid import SchemaAgentHybrid  # hybrid workflow design
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
-from .connection_views import ConnectView, FileConnectView, ConnectionListView, ConnectionDetailView, ConnectionRefreshView
-from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView 
+from .connection_views import (
+    ConnectView,
+    FileConnectView,
+    ConnectionListView,
+    ConnectionDetailView,
+    ConnectionRefreshView,
+    RestoreSampleConnectionsView,
+)
+from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView
 from .sql_agent import SqlAgent
+from .run_views import RunCancelView
 
 
 
@@ -44,17 +54,30 @@ urlpatterns = [
     path("threads/", views.ChatListView.as_view()),
     path("threads/<str:thread_id>/", views.ChatDetailView.as_view()),
     # path("threads/<str:thread_id>/delete/", views.ChatDeleteView.as_view()),
+
+    # Bulk cleanup — removes every non-starred chat AND non-starred schema
+    # project for the caller. Lives outside /threads/ now because it spans
+    # both resources.
+    path("cleanup/non-starred/", views.BulkDeleteNonStarredView.as_view()),
     path('aichat/', views.AiChatView.as_view(), name='AiChatView'),
     
     # Connections
     path('connect/', ConnectView.as_view(), name='connect'),
     path('connect/file/', FileConnectView.as_view(), name='connect_file'),
     path('connections/', ConnectionListView.as_view(), name='connections'),
+    path('connections/restore-samples/', RestoreSampleConnectionsView.as_view(), name='connections_restore_samples'),
     path('connection/<uuid:connection_id>/', ConnectionDetailView.as_view(), name='connection_detail'),
     path('connection/<uuid:connection_id>/refresh/', ConnectionRefreshView.as_view(), name='connection_refresh'),
 
     # Token usage
     path('usage/', views.UsageView.as_view(), name='usage'),
+
+    # Chat search (full-text across SQL chats + schema projects)
+    path('search/', views.ChatSearchView.as_view(), name='chat_search'),
+
+    # Long-term memory (user-facing CRUD over what the agents remember)
+    path('memories/', memory_views.MemoryListCreateView.as_view(), name='memories'),
+    path('memories/<str:memory_id>/', memory_views.MemoryDetailView.as_view(), name='memory_detail'),
 
     # SQL Conversations
     path('sql-agent/', SqlAgent.as_view(), name='sql_agent'),
@@ -65,7 +88,8 @@ urlpatterns = [
 
     # SCHEMA Agent
     # path("variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
-    path('schema-agent/', SchemaAgent.as_view(), name='schema_view'),
+    # path('schema-agent/', SchemaAgent.as_view(), name='schema_view'),         # agentic
+    path('schema-agent/', SchemaAgentHybrid.as_view(), name='schema_view'),    # hybrid workflow
     path("schema-projects/", SchemaProjectListView.as_view(), name="ai-project-list"),
     path("schema-project/<slug:slug>/", SchemaProjectDetailView.as_view(), name="ai-project-detail"),
     path("schema-variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
@@ -75,6 +99,9 @@ urlpatterns = [
     path('result/sql/<uuid:result_id>/', SQLResultUpdateView.as_view(), name='result_sql_update'),
     path('result/chart/<uuid:result_id>/refresh/', ChartRefreshView.as_view(), name='chart_refresh'),
     path('result/<uuid:result_id>/export-csv/', ExportCSVView.as_view(), name='export_csv'),
+
+    # Cancel an in-flight schema/SQL agent run
+    path('runs/<str:run_id>/cancel/', RunCancelView.as_view(), name='run_cancel'),
 
     # Stream
     path('stream/', StreamStateUpdateView.as_view(), name='StreamStateUpdateView'),

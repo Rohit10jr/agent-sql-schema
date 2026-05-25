@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -66,7 +67,7 @@ from dataclasses import dataclass
 from langgraph.runtime import Runtime
 from typing import Annotated, TypedDict, Union, Dict, Any
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from .models import ChatSession
+from .models import ChatSession, ConversationMessage, SchemaProject
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.decorators import api_view, throttle_classes
 from django.core.mail import EmailMultiAlternatives
@@ -74,6 +75,7 @@ from django.utils.html import strip_tags
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from core.utils import generate_chat_title
 from core.services.email import send_verification_email, send_password_reset_email
+from core.services.sample_data import provision_sample_connections
 # from rest_framework.throttling import UserRateThrottle
 
 
@@ -103,6 +105,17 @@ def signup(request):
     serializer = SignupSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
+
+        # Seed read-only sample DBs (Netflix etc.) so the user can try the
+        # agent immediately without connecting their own database. Wrapped in
+        # try/except — signup must never fail because provisioning hiccuped.
+        try:
+            provision_sample_connections(user)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to provision sample connections for user %s", user.pk,
+            )
 
         try:
             send_verification_email(user)
@@ -346,16 +359,16 @@ def password_reset_confirm(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Set new password
-        user.set_password(password)
-        # logger.info(f"Password reset for user {user.email}")
-        # logger.info(f"Password reset for user {user.email}")
-        user.save()
+        # Atomic: the password change and the invalidation of existing refresh
+        # tokens must succeed together. Partial state (new password set but old
+        # tokens still valid) is a security issue.
+        with transaction.atomic():
+            user.set_password(password)
+            user.save()
 
-        # Blacklist all existing refresh tokens
-        for token in OutstandingToken.objects.filter(user=user):
-            BlacklistedToken.objects.get_or_create(token=token)
-        
+            for token in OutstandingToken.objects.filter(user=user):
+                BlacklistedToken.objects.get_or_create(token=token)
+
         return Response(
             {"message": "Password reset successful."},
             status=status.HTTP_200_OK
@@ -432,7 +445,7 @@ def password_change(request):
 
 
 # =================
-# --- CHAT VIEW ---
+# --- AI CHAT VIEW ---
 # =================
 
 DB_URI = settings.DB_URI
@@ -727,6 +740,7 @@ class ChatListView(APIView):
             {
                 "thread_id": c.thread_id,
                 "title": c.title,
+                "is_starred": c.is_starred,
                 "created_at": c.created_at
             }
             for c in chats
@@ -737,23 +751,36 @@ class ChatListView(APIView):
 class ChatDetailView(APIView):
 
     def patch(self, request, thread_id):
+        # Accept any subset of {title, is_starred}. At least one must be present.
         title = request.data.get("title")
+        is_starred = request.data.get("is_starred")
 
-        if not title:
+        if title is None and is_starred is None:
             return Response(
-                {"error": "Title is required"},
+                {"error": "At least one of 'title' or 'is_starred' is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             chat = ChatSession.objects.get(thread_id=thread_id, user=request.user)
-            chat.title = title
+
+            if title is not None:
+                if not title:
+                    return Response(
+                        {"error": "Title cannot be empty"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                chat.title = title
+
+            if is_starred is not None:
+                chat.is_starred = bool(is_starred)
+
             chat.save()
 
             return Response({
-                "message": "Title updated",
-                "thread_id": thread_id,
-                "title": title
+                "thread_id": chat.thread_id,
+                "title": chat.title,
+                "is_starred": chat.is_starred,
             })
 
         except ChatSession.DoesNotExist:
@@ -768,6 +795,9 @@ class ChatDetailView(APIView):
 
             pg_checkpointer.delete_thread(thread_id)
             chat.delete()
+            ConversationMessage.objects.filter(
+                user=request.user, agent="sql", thread_id=thread_id,
+            ).delete()
 
             return Response({
                 "message": "Chat deleted",
@@ -779,6 +809,65 @@ class ChatDetailView(APIView):
                 {"error": "Chat not found or access denied"},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class BulkDeleteNonStarredView(APIView):
+    """DELETE /api/cleanup/non-starred/ — hard-delete every non-starred chat
+    AND every non-starred schema project belonging to the caller. Clears the
+    corresponding LangGraph checkpointer threads (chats and schemas use
+    independent checkpointers) so message history doesn't linger in the
+    checkpointer DB.
+
+    Returns {"count": N} — total items removed (chats + schemas).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Snapshot identifiers before any deletion so we still know what to
+        # clean from the checkpointer even if the ORM delete races.
+        chat_thread_ids = list(
+            ChatSession.objects
+            .filter(user=request.user, is_starred=False)
+            .values_list("thread_id", flat=True)
+        )
+
+        schema_slugs = list(
+            SchemaProject.objects
+            .filter(user=request.user, is_starred=False)
+            .values_list("slug", flat=True)
+        )
+
+        # Checkpointer cleanup is best-effort and runs on a separate connection
+        # pool — a single failure shouldn't block the rest of the bulk delete.
+        for tid in chat_thread_ids:
+            try:
+                pg_checkpointer.delete_thread(tid)
+            except Exception:
+                log.exception("Failed to clear chat checkpointer for thread %s", tid)
+
+        # Schema agent has its own checkpointer instance — import lazily to
+        # avoid a circular import at module load.
+        from core.schema_agent import pg_checkpointer as schema_checkpointer
+        for slug in schema_slugs:
+            try:
+                schema_checkpointer.delete_thread(slug)
+            except Exception:
+                log.exception("Failed to clear schema checkpointer for slug %s", slug)
+
+        # Atomic: both bulk deletes succeed together or neither does. Keeps the
+        # user's sidebar in a consistent state if one query unexpectedly fails.
+        with transaction.atomic():
+            ChatSession.objects.filter(user=request.user, is_starred=False).delete()
+            SchemaProject.objects.filter(user=request.user, is_starred=False).delete()
+            # Drop the search-index rows for everything that was removed.
+            ConversationMessage.objects.filter(
+                user=request.user, thread_id__in=chat_thread_ids + schema_slugs,
+            ).delete()
+
+        return Response({"count": len(chat_thread_ids) + len(schema_slugs)})
 
 
 def get_clean_chat_history(raw_messages, reverse=True):
@@ -924,3 +1013,129 @@ class UsageView(APIView):
             "quota": self.QUOTA,
             "percent_used": percent_used,
         })
+
+
+# ── Chat search ─────────────────────────────────────────────────────
+
+def _search_snippet(text: str, query: str, radius: int = 40) -> str:
+    """Return a short window of `text` around the first occurrence of `query`."""
+    idx = text.lower().find(query.lower())
+    if idx == -1:
+        # Full-text matched on a lexeme that isn't a literal substring (stemming,
+        # stop-word handling) — fall back to the head of the message.
+        head = text[: radius * 2].strip()
+        return head + ("…" if len(text) > radius * 2 else "")
+    start = max(0, idx - radius)
+    end = min(len(text), idx + len(query) + radius)
+    return (
+        ("…" if start > 0 else "")
+        + text[start:end].strip()
+        + ("…" if end < len(text) else "")
+    )
+
+
+class ChatSearchView(APIView):
+    """GET /api/search/?q=... — search the caller's SQL chats and schema
+    projects by title and by message content (Postgres full-text).
+
+    Each result identifies a thread:
+        {agent: "sql"|"schema", thread_id, title, matched_text|null, rank}
+    Title matches carry rank 1.0 so they sort above content matches.
+    """
+    permission_classes = [IsAuthenticated]
+
+    MIN_QUERY_LEN = 2
+    TITLE_LIMIT = 20
+    CONTENT_LIMIT = 60
+
+    def get(self, request):
+        from django.db.models import Q
+        from django.contrib.postgres.search import SearchQuery, SearchRank
+        from core.models import ConversationMessage
+
+        query = (request.query_params.get("q") or "").strip()
+        if len(query) < self.MIN_QUERY_LEN:
+            return Response({"results": []})
+
+        user = request.user
+        results = []
+        seen = set()  # (agent, thread_id) already represented by a title match
+
+        # ── 1. Title matches (substring, cheap) ───────────────────────
+        chats = ChatSession.objects.filter(
+            user=user, title__icontains=query,
+        ).order_by("-created_at")[: self.TITLE_LIMIT]
+        for chat in chats:
+            seen.add(("sql", chat.thread_id))
+            results.append({
+                "agent": "sql",
+                "thread_id": chat.thread_id,
+                "title": chat.title or "Untitled chat",
+                "matched_text": None,
+                "rank": 1.0,
+            })
+
+        projects = SchemaProject.objects.filter(user=user).filter(
+            Q(name__icontains=query) | Q(description__icontains=query),
+        ).order_by("-updated_at")[: self.TITLE_LIMIT]
+        for project in projects:
+            seen.add(("schema", project.slug))
+            results.append({
+                "agent": "schema",
+                "thread_id": project.slug,
+                "title": project.name or "Untitled schema",
+                "matched_text": None,
+                "rank": 1.0,
+            })
+
+        # ── 2. Message-content matches (full-text, ranked) ────────────
+        search_query = SearchQuery(query, config="english")
+        hits = (
+            ConversationMessage.objects
+            .filter(user=user, search_vector=search_query)
+            .annotate(rank=SearchRank("search_vector", search_query))
+            .order_by("-rank")[: self.CONTENT_LIMIT]
+        )
+
+        # Collapse to the best-ranked message per thread.
+        best = {}
+        for hit in hits:
+            key = (hit.agent, hit.thread_id)
+            if key not in seen and key not in best:
+                best[key] = hit
+
+        # Resolve titles in bulk; drop hits whose thread was since deleted.
+        sql_ids = [tid for (agent, tid) in best if agent == "sql"]
+        schema_ids = [tid for (agent, tid) in best if agent == "schema"]
+        sql_titles = dict(
+            ChatSession.objects
+            .filter(user=user, thread_id__in=sql_ids)
+            .values_list("thread_id", "title")
+        )
+        schema_titles = dict(
+            SchemaProject.objects
+            .filter(user=user, slug__in=schema_ids)
+            .values_list("slug", "name")
+        )
+
+        for (agent, thread_id), hit in best.items():
+            if agent == "sql":
+                title = sql_titles.get(thread_id)
+                fallback = "Untitled chat"
+            else:
+                title = schema_titles.get(thread_id)
+                fallback = "Untitled schema"
+            if title is None and thread_id not in (
+                sql_titles if agent == "sql" else schema_titles
+            ):
+                continue  # thread deleted or not owned — skip orphan index row
+            results.append({
+                "agent": agent,
+                "thread_id": thread_id,
+                "title": title or fallback,
+                "matched_text": _search_snippet(hit.text, query),
+                "rank": float(hit.rank),
+            })
+
+        results.sort(key=lambda r: r["rank"], reverse=True)
+        return Response({"results": results})
