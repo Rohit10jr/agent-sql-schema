@@ -21,6 +21,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.errors import classify_error
 from core.models import ConversationMessage, SchemaProject
 from core.services import memory as ltm
 from core.services import run_registry
@@ -291,8 +292,21 @@ class SchemaAgentHybrid(APIView):
                         )
 
             except Exception as e:
-                logger.exception("Hybrid schema-agent stream failed")
-                yield _sse({"type": "error", "error": str(e)})
+                info = classify_error(e)
+                logger.exception(
+                    "schema_agent_hybrid_stream_failed",
+                    extra={
+                        "run_id": run_id,
+                        "user_id": str(request.user.id),
+                        "thread_id": thread_id,
+                        "agent": "schema",
+                        "model": model,
+                        "error_code": info.code,
+                        "error_class": type(e).__name__,
+                        "retryable": info.retryable,
+                    },
+                )
+                yield _sse(info.to_sse(run_id=run_id))
 
             finally:
                 run_registry.unregister(run_id)

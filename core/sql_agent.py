@@ -35,6 +35,7 @@ from typing_extensions import TypedDict
 
 # ── Local ──────────────────────────────────────────────────────────
 from core.models import ChatSession, Connection, Result, TokenUsage
+from core.errors import classify_error
 from core.services.connection import ConnectionService
 from core.services.sql_prompt import build_system_prompt
 from core.services import memory as ltm
@@ -495,8 +496,9 @@ _summarizer_llm = ChatGroq(
     model=DEFAULT_MODEL,
     temperature=0.0,
     max_tokens=512,
+    timeout=60,
     api_key=GROQ_API_KEY,
-    max_retries=2,
+    max_retries=3,
 )
 
 
@@ -895,8 +897,21 @@ class SqlAgent(APIView):
                         )
 
             except Exception as e:
-                logger.exception("SQL agent stream failed")
-                yield _sse({"type": "error", "error": str(e)})
+                info = classify_error(e)
+                logger.exception(
+                    "sql_agent_stream_failed",
+                    extra={
+                        "run_id": run_id,
+                        "user_id": user_id,
+                        "thread_id": thread_id,
+                        "agent": "sql",
+                        "model": model,
+                        "error_code": info.code,
+                        "error_class": type(e).__name__,
+                        "retryable": info.retryable,
+                    },
+                )
+                yield _sse(info.to_sse(run_id=run_id))
 
             finally:
                 run_registry.unregister(run_id)
