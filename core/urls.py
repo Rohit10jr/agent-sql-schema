@@ -10,7 +10,8 @@ from . import sql_views
 from . import schema_views
 from . import memory_views
 from .schema_views import SchemaProjectListView, SchemaProjectDetailView, SchemaProjectUpdateSerializer, GetSQLVariantView
-from .schema_agent import SchemaAgent 
+from .schema_agent import SchemaAgent  # agentic design — kept loaded; schema_views imports from this module
+from .schema_agent_hybrid import SchemaAgentHybrid  # hybrid workflow design
 from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
 from .connection_views import (
     ConnectView,
@@ -20,8 +21,9 @@ from .connection_views import (
     ConnectionRefreshView,
     RestoreSampleConnectionsView,
 )
-from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView 
+from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView
 from .sql_agent import SqlAgent
+from .run_views import RunCancelView
 
 
 
@@ -86,7 +88,8 @@ urlpatterns = [
 
     # SCHEMA Agent
     # path("variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
-    path('schema-agent/', SchemaAgent.as_view(), name='schema_view'),
+    # path('schema-agent/', SchemaAgent.as_view(), name='schema_view'),         # agentic
+    path('schema-agent/', SchemaAgentHybrid.as_view(), name='schema_view'),    # hybrid workflow
     path("schema-projects/", SchemaProjectListView.as_view(), name="ai-project-list"),
     path("schema-project/<slug:slug>/", SchemaProjectDetailView.as_view(), name="ai-project-detail"),
     path("schema-variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
@@ -96,6 +99,9 @@ urlpatterns = [
     path('result/sql/<uuid:result_id>/', SQLResultUpdateView.as_view(), name='result_sql_update'),
     path('result/chart/<uuid:result_id>/refresh/', ChartRefreshView.as_view(), name='chart_refresh'),
     path('result/<uuid:result_id>/export-csv/', ExportCSVView.as_view(), name='export_csv'),
+
+    # Cancel an in-flight schema/SQL agent run
+    path('runs/<str:run_id>/cancel/', RunCancelView.as_view(), name='run_cancel'),
 
     # Stream
     path('stream/', StreamStateUpdateView.as_view(), name='StreamStateUpdateView'),

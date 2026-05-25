@@ -49,9 +49,10 @@ SUPPORTED_MODELS = (
     "meta-llama/llama-4-scout-17b-16e-instruct",
     "qwen/qwen3-32b",
 )
-DEFAULT_MODEL = "openai/gpt-oss-120b"
+DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+SUMMARIZE_MODEL = "openai/gpt-oss-120b"
 
-MAX_TOKENS_BEFORE_SUMMARY = 3000
+MAX_TOKENS_BEFORE_SUMMARY = 2500
 KEEP_RECENT_MESSAGES = 10
 
 SUPPORTED_DIALECTS = {"postgresql", "mysql", "sqlite", "tsql", "standard"}
@@ -60,7 +61,17 @@ DEFAULT_DIALECT = "postgresql"
 DB_URI = settings.DB_URI
 
 
-def _groq(model: str, *, max_tokens: int, temperature: float = 0.1) -> ChatGroq:
+def _groq(
+    model: str,
+    *,
+    max_tokens: int,
+    temperature: float = 0.1,
+    disable_streaming: bool = False,
+) -> ChatGroq:
+    # Groq's streaming + tool-calling path can raise "Failed to parse tool call
+    # arguments as JSON" on large/complex tool calls (the schema/SQL tools carry
+    # big JSON arguments). Tool-calling LLMs here disable streaming so Groq takes
+    # the robust non-streaming path instead.
     return ChatGroq(
         model=model,
         temperature=temperature,
@@ -68,6 +79,7 @@ def _groq(model: str, *, max_tokens: int, temperature: float = 0.1) -> ChatGroq:
         timeout=60,
         api_key=settings.GROQ_API_KEY,
         max_retries=3,
+        disable_streaming=disable_streaming,
     )
 
 
@@ -135,14 +147,21 @@ class SQLGeneration(BaseModel):
 # Pre-built per supported model. The agent picks its tool-bound LLM and the
 # tools pick their structured generators by the request's chosen model.
 def _build_bundle(model: str) -> dict:
+    # Structured output is itself a forced tool call → disable streaming.
+    # max_tokens is reserved in full against Groq's per-minute token budget
+    # (prompt + max_tokens must fit the tier's TPM limit), so keep it modest.
     return {
-        "schema": _groq(model, max_tokens=5000).with_structured_output(DatabaseSchema),
-        "sql": _groq(model, max_tokens=7000).with_structured_output(SQLGeneration),
+        "schema": _groq(model, max_tokens=2500, disable_streaming=True).with_structured_output(
+            DatabaseSchema
+        ),
+        "sql": _groq(model, max_tokens=2000, disable_streaming=True).with_structured_output(
+            SQLGeneration
+        ),
     }
 
 
 SCHEMA_GENERATORS: dict[str, dict] = {m: _build_bundle(m) for m in SUPPORTED_MODELS}
-_summarizer_llm = _groq(DEFAULT_MODEL, max_tokens=700, temperature=0.0)
+_summarizer_llm = _groq(SUMMARIZE_MODEL, max_tokens=1000, temperature=0.0)
 
 
 def _generators_for(model: str) -> dict:
@@ -370,9 +389,9 @@ def generate_schema(
 
 
 @tool
-def validate_schema_json(schema_json: str) -> str:
-    """Validate a schema JSON artifact and return concrete issues."""
-    payload, error = _load_json_object(schema_json)
+def validate_schema_json(schema_ir: str) -> str:
+    """Validate a schema JSON artifact (the schema IR) and return concrete issues."""
+    payload, error = _load_json_object(schema_ir)
     if error:
         return _json_response(artifact="schema_validation", ok=False, issues=[error])
     issues = validate_schema_payload(payload)
@@ -381,14 +400,17 @@ def validate_schema_json(schema_json: str) -> str:
 
 @tool
 def generate_sql(
-    schema_json: str,
+    schema_ir: str,
     dialect: str = DEFAULT_DIALECT,
     seed_rows_per_table: int = 3,
 ) -> str:
-    """Generate validated CREATE TABLE SQL and INSERT seed data from schema JSON."""
+    """Generate validated CREATE TABLE SQL and INSERT seed data from a schema IR.
+
+    schema_ir is the JSON schema artifact produced by generate_schema.
+    """
     dialect = _normalize_dialect(dialect)
     seed_rows = max(0, min(int(seed_rows_per_table or 0), 5))
-    schema_payload, error = _load_json_object(schema_json)
+    schema_payload, error = _load_json_object(schema_ir)
     if error:
         return _json_response(artifact="sql", ok=False, validation_issues=[error])
 
@@ -432,8 +454,12 @@ def validate_sql(sql: str, seed_data: str = "", dialect: str = DEFAULT_DIALECT) 
 
 
 TOOLS = [generate_schema, validate_schema_json, generate_sql, validate_sql]
+# Agent LLMs always have tools bound → disable streaming to dodge Groq's
+# streaming tool-call JSON-parse bug. The agent's final text answer therefore
+# arrives whole (at the `done` event) rather than token-by-token.
 AGENT_LLMS: dict[str, Any] = {
-    model: _groq(model, max_tokens=2500).bind_tools(TOOLS) for model in SUPPORTED_MODELS
+    model: _groq(model, max_tokens=2000, disable_streaming=True).bind_tools(TOOLS)
+    for model in SUPPORTED_MODELS
 }
 
 
@@ -451,6 +477,17 @@ Operating model:
 - Do not claim SQL is production-ready unless validate_sql or generate_sql
   returned ok=true.
 - Ask concise clarification questions when requirements are too vague or unsafe.
+
+Response style (important):
+- The generated tables, ER diagram, and SQL are ALREADY shown to the user in a
+  separate artifact panel. Do NOT repeat them in your chat reply.
+- Never paste schema JSON, CREATE TABLE or INSERT statements, full column lists,
+  or table-by-table definitions into your message.
+- Your chat reply is a short, plain-language explanation only: what you built or
+  changed, the key design decisions, any assumptions made, and any validation
+  issues. A few sentences is ideal — keep it conversational, not a spec dump.
+- You may mention a table or column name inline when explaining a decision, but
+  do not enumerate the whole schema.
 """
 
 
@@ -522,6 +559,7 @@ def recall_memories(state: SchemaGraphState, runtime: Runtime[SchemaContext]) ->
 def call_agent(state: SchemaGraphState, runtime: Runtime[SchemaContext]) -> dict:
     """The conversational agent — picks its tool-bound LLM by the chosen model."""
     llm = AGENT_LLMS.get(runtime.context.model) or AGENT_LLMS[DEFAULT_MODEL]
+    print(f"=== model_name : {runtime.context.model} ===")
 
     system = SYSTEM_PROMPT
     if state.get("summary"):
