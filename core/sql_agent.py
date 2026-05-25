@@ -38,6 +38,7 @@ from core.models import ChatSession, Connection, Result, TokenUsage
 from core.services.connection import ConnectionService
 from core.services.sql_prompt import build_system_prompt
 from core.services import memory as ltm
+from core.services import run_registry
 from core.utils import generate_chat_title
 
 logger = logging.getLogger(__name__)
@@ -674,6 +675,25 @@ class SqlAgent(APIView):
         except Exception as e:
             return Response({"error": f"Failed to connect: {e}"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Reject a second POST on the same thread while a run is in flight.
+        # Frontend reads the existing run_id and decides whether to cancel + retry.
+        run_id = uuid4().hex
+        try:
+            handle = run_registry.register(
+                run_id=run_id,
+                user_id=user_id,
+                agent="sql",
+                thread_id=thread_id,
+            )
+        except run_registry.ConcurrentRunError as e:
+            return Response(
+                {
+                    "error": "A run is already in flight on this thread",
+                    "run_id": e.existing.run_id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         context = UserContext(
             user_id=user_id,
             db=db,
@@ -685,6 +705,7 @@ class SqlAgent(APIView):
         def stream_generator():
             last_run_result_id: Optional[Any] = None  # link CHART_GENERATION_RESULT -> SQL_QUERY_RUN_RESULT
             produced_response = False  # any AIMessage content this turn? gates ChatSession cleanup on failure
+            was_cancelled = False
 
             try:
                 if new_thread:
@@ -694,6 +715,9 @@ class SqlAgent(APIView):
                         "connection_id": str(connection.id),
                     })
 
+                # Tell the client the run_id so it can target POST /runs/<id>/cancel/.
+                yield _sse({"type": "run_started", "run_id": run_id})
+
                 for mode, data in sql_agent.stream(
                     {"messages": [HumanMessage(content=query)]},
                     stream_mode=["messages", "updates"],
@@ -701,6 +725,15 @@ class SqlAgent(APIView):
                     context=context,
                     version="v2",
                 ):
+                    # Cooperative cancellation: check between super-step events.
+                    # The agent→tools loop can leave orphan tool_calls — repair
+                    # before yielding so the next turn doesn't fail.
+                    if handle.cancel_event.is_set():
+                        was_cancelled = True
+                        run_registry.repair_orphan_tool_calls(sql_agent, config)
+                        yield _sse({"type": "cancelled", "run_id": run_id})
+                        break
+
                     # ─── 1. MESSAGES MODE — token + reasoning streaming ─────
                     if mode == "messages":
                         token, metadata = data
@@ -817,6 +850,11 @@ class SqlAgent(APIView):
                                         })
 
                 # ─── 3. FINAL — done event + title for new threads ─────────
+                # Skipped on cancel: `cancelled` SSE has already been emitted
+                # and any orphan tool_calls have been repaired.
+                if was_cancelled:
+                    return
+
                 final_state = sql_agent.get_state(config)
                 final_messages = final_state.values.get("messages", []) if final_state else []
                 last = final_messages[-1] if final_messages else None
@@ -861,10 +899,12 @@ class SqlAgent(APIView):
                 yield _sse({"type": "error", "error": str(e)})
 
             finally:
+                run_registry.unregister(run_id)
+
                 # If this was a brand-new chat and the agent never produced a real
                 # response, drop the empty ChatSession so it doesn't clutter the
-                # sidebar. Runs even on client disconnect.
-                if new_thread and not produced_response:
+                # sidebar. Skip on cancel — the user may want to retry on the same thread.
+                if new_thread and not produced_response and not was_cancelled:
                     try:
                         deleted, _ = ChatSession.objects.filter(
                             thread_id=thread_id, user=request.user
