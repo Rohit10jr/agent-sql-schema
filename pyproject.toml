@@ -46,6 +46,7 @@ dependencies = [
     "google-genai==1.64.0",
     "greenlet==3.3.2",
     "groq==0.37.1",
+    "gunicorn>=26.0.0",
     "h11==0.16.0",
     "h2==4.3.0",
     "hpack==4.1.0",

@@ -21,8 +21,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.errors import classify_error
 from core.models import ConversationMessage, SchemaProject
 from core.services import memory as ltm
+from core.services import run_registry
 from core.services.schema_graph_hybrid import (
     DEFAULT_MODEL,
     SUPPORTED_MODELS,
@@ -71,17 +73,41 @@ class SchemaAgentHybrid(APIView):
         requested_model = request.data.get("model") or DEFAULT_MODEL
         model = requested_model if requested_model in SUPPORTED_MODELS else DEFAULT_MODEL
 
+        # Reject a second POST on the same thread while a run is in flight.
+        # Frontend reads the existing run_id and decides whether to cancel + retry.
+        run_id = uuid4().hex
+        try:
+            handle = run_registry.register(
+                run_id=run_id,
+                user_id=str(request.user.id),
+                agent="schema",
+                thread_id=thread_id,
+            )
+        except run_registry.ConcurrentRunError as e:
+            return Response(
+                {
+                    "error": "A run is already in flight on this thread",
+                    "run_id": e.existing.run_id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         # Get or create the project up-front so the checkpointer has a stable
         # slug. Empty projects (failed first turn) are cleaned up in `finally`.
-        project, new_project = SchemaProject.objects.get_or_create(
-            slug=thread_id,
-            defaults={"user": request.user},
-        )
-        if not new_project and project.user != request.user:
-            return Response(
-                {"error": "Unauthorized project access"},
-                status=status.HTTP_403_FORBIDDEN,
+        try:
+            project, new_project = SchemaProject.objects.get_or_create(
+                slug=thread_id,
+                defaults={"user": request.user},
             )
+            if not new_project and project.user != request.user:
+                run_registry.unregister(run_id)
+                return Response(
+                    {"error": "Unauthorized project access"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except Exception:
+            run_registry.unregister(run_id)
+            raise
 
         config = {"configurable": {"thread_id": thread_id}}
         context = SchemaContext(user_id=str(request.user.id), model=model)
@@ -112,6 +138,7 @@ class SchemaAgentHybrid(APIView):
 
         def stream_generator():
             produced_response = False
+            was_cancelled = False
             final_text = ""
             schema_artifact: dict | None = None
             sql_artifact: str | None = None
@@ -121,12 +148,22 @@ class SchemaAgentHybrid(APIView):
                 if new_project:
                     yield _sse({"type": "thread_created", "slug": thread_id})
 
+                # Tell the client the run_id so it can target POST /runs/<id>/cancel/.
+                yield _sse({"type": "run_started", "run_id": run_id})
+
                 for mode, data in schema_agent_hybrid.stream(
                     initial,
                     stream_mode=["messages", "updates"],
                     config=config,
                     context=context,
                 ):
+                    # Cooperative cancellation: check between super-step events.
+                    if handle.cancel_event.is_set():
+                        was_cancelled = True
+                        run_registry.repair_orphan_tool_calls(schema_agent_hybrid, config)
+                        yield _sse({"type": "cancelled", "run_id": run_id})
+                        break
+
                     # ── 1. MESSAGES — only stream the respond node's tokens ──
                     if mode == "messages":
                         token, metadata = data
@@ -184,6 +221,12 @@ class SchemaAgentHybrid(APIView):
                                 })
 
                 # ── 3. FINAL — done + persist + title + indexing ────────────
+                # Skipped on cancel: the `cancelled` SSE event has already been
+                # emitted and committed checkpointer state carries the partial
+                # work to the next turn.
+                if was_cancelled:
+                    return
+
                 final_state = schema_agent_hybrid.get_state(config)
                 values = final_state.values if final_state else {}
                 final_messages = values.get("messages", [])
@@ -249,12 +292,28 @@ class SchemaAgentHybrid(APIView):
                         )
 
             except Exception as e:
-                logger.exception("Hybrid schema-agent stream failed")
-                yield _sse({"type": "error", "error": str(e)})
+                info = classify_error(e)
+                logger.exception(
+                    "schema_agent_hybrid_stream_failed",
+                    extra={
+                        "run_id": run_id,
+                        "user_id": str(request.user.id),
+                        "thread_id": thread_id,
+                        "agent": "schema",
+                        "model": model,
+                        "error_code": info.code,
+                        "error_class": type(e).__name__,
+                        "retryable": info.retryable,
+                    },
+                )
+                yield _sse(info.to_sse(run_id=run_id))
 
             finally:
+                run_registry.unregister(run_id)
+
                 # Drop an empty new project so it doesn't clutter the sidebar.
-                if new_project and not produced_response:
+                # Skip on cancel: the user may want to retry on the same thread.
+                if new_project and not produced_response and not was_cancelled:
                     try:
                         SchemaProject.objects.filter(
                             slug=thread_id, user=request.user,

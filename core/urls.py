@@ -21,8 +21,9 @@ from .connection_views import (
     ConnectionRefreshView,
     RestoreSampleConnectionsView,
 )
-from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView 
+from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView
 from .sql_agent import SqlAgent
+from .run_views import RunCancelView
 
 
 
@@ -98,6 +99,9 @@ urlpatterns = [
     path('result/sql/<uuid:result_id>/', SQLResultUpdateView.as_view(), name='result_sql_update'),
     path('result/chart/<uuid:result_id>/refresh/', ChartRefreshView.as_view(), name='chart_refresh'),
     path('result/<uuid:result_id>/export-csv/', ExportCSVView.as_view(), name='export_csv'),
+
+    # Cancel an in-flight schema/SQL agent run
+    path('runs/<str:run_id>/cancel/', RunCancelView.as_view(), name='run_cancel'),
 
     # Stream
     path('stream/', StreamStateUpdateView.as_view(), name='StreamStateUpdateView'),
