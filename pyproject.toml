@@ -168,3 +168,29 @@ ignore = [
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
+
+# ── Pytest ─────────────────────────────────────────────────────────────────
+# Run with: `pytest`  (from backend/)
+# pytest-django reads DJANGO_SETTINGS_MODULE below; no need to set the env var.
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "agent.settings"
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+testpaths = ["core/tests"]
+addopts = [
+    "-ra",                 # short summary of skipped / xfailed / etc. at the end
+    "--strict-markers",    # error on unknown @pytest.mark.<name> typos
+    "--strict-config",     # error on unknown ini options
+    "--tb=short",          # compact tracebacks
+]
+markers = [
+    "integration: hits external services (Groq, real DB beyond the test fixture). Skipped by default in CI fast lane.",
+    "slow: takes > 1 second; safe to skip in tight feedback loops.",
+]
+filterwarnings = [
+    # Silence noisy upstream deprecations — re-enable when investigating
+    "ignore::DeprecationWarning:django.*",
+    "ignore::DeprecationWarning:rest_framework.*",
+    "ignore::PendingDeprecationWarning",
+]

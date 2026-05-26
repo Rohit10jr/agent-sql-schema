@@ -16,11 +16,16 @@ repos:
       - id: ruff-format          # auto-format
 
   # ── Basic file hygiene ─────────────────────────────────────────────────
+  # `requirements.txt` excluded from whitespace / line-ending hooks because
+  # we regenerate it from pip freeze and want byte-perfect control over its
+  # contents to avoid past UTF-16/BOM disasters.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^requirements.*\.txt$
       - id: end-of-file-fixer
+        exclude: ^requirements.*\.txt$
       - id: check-yaml
         # Compose's `!reset` / `!override` tags would trip the default parser.
         args: [--unsafe]
@@ -31,6 +36,7 @@ repos:
         args: [--maxkb=2000]     # warn if >2 MB committed (samples/*.sqlite3 are fine)
       - id: mixed-line-ending
         args: [--fix=lf]         # normalize CRLF → LF on commit (Windows dev safety)
+        exclude: ^requirements.*\.txt$
 
   # ── Secret scanner — blocks accidentally committed API keys ─────────────
   - repo: https://github.com/Yelp/detect-secrets
