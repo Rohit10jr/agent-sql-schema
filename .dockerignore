@@ -1,0 +1,62 @@
+# Keep the build context small + reproducible. Anything in here is excluded
+# from `COPY . .` in the Dockerfile. Same patterns as .gitignore plus a few
+# Docker-specific extras (your local venv etc. would otherwise balloon the
+# image by ~1.2GB and break on a different OS).
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+*.egg
+
+# Tests / coverage / type-checker caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Logs + runtime artifacts
+logs/
+*.log
+celerybeat-schedule
+celerybeat.pid
+dump.rdb
+
+# Django collected static + uploaded media (rebuilt inside the image)
+staticfiles/
+media/
+
+# Secrets and env files — must be passed in via docker env, never baked in
+.env
+.env.*
+!.env.docker.example
+
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# VCS + CI metadata (not needed in the image)
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Docker meta itself — no need to include
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Project docs that don't need shipping into the runtime container
+*.md
+LICENSE

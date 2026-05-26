@@ -1,0 +1,58 @@
+# Local development stack. One command spins up Postgres (with pgvector)
+# + the Django backend wired together.
+#
+#   cp .env.docker.example .env.docker      # fill in GROQ_API_KEY + GEMINI_API_KEY
+#   docker compose up --build
+#
+# Then:
+#   * Backend API   http://localhost:8000/api/
+#   * Admin         http://localhost:8000/admin/        (login with ADMIN_*)
+#   * Healthcheck   http://localhost:8000/api/healthz/
+#   * Postgres      localhost:5433  (mapped from 5432 inside)
+#     → connect a GUI client (TablePlus / DBeaver / pgAdmin) here.
+
+services:
+  db:
+    # pgvector-prebuilt Postgres image — saves the `apt install pgvector` dance.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_sql}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      # Named volume keeps DB data across `docker compose down`.
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # 5433 on host → 5432 in container, avoids clashing with any local Postgres.
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-agent_sql}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the code so `runserver` auto-reloads on file changes during dev.
+      # Production builds DO NOT use this — the image bakes the code in.
+      - ./:/app
+      # Hide the local .venv from the container — let the image's /opt/venv win.
+      - /app/.venv
+    # The Dockerfile already defines HEALTHCHECK against /api/healthz/.
+    # Compose will respect it; no need to redeclare.
+
+volumes:
+  pgdata:

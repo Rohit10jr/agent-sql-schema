@@ -250,6 +250,77 @@ All endpoints under `/api/`. JWT bearer auth required unless noted.
 
 ---
 
+## Run with Docker (recommended for collaborators)
+
+Frontend devs collaborating on this project don't need to install Python, Postgres, or pgvector locally. Just Docker.
+
+### Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose plugin on Linux)
+- A Groq API key + a Gemini API key
+
+### Steps
+
+```powershell
+# 1. Clone
+git clone https://github.com/Rohit10jr/agent-sql-schema.git
+cd agent-sql-schema/backend
+
+# 2. Copy the env template and paste in your API keys
+cp .env.docker.example .env.docker
+# → open .env.docker and fill in GROQ_API_KEY and GEMINI_API_KEY
+
+# 3. Build + start the stack
+docker compose up --build
+```
+
+First boot takes ~2 min (downloads Postgres + Python base images, installs deps). Subsequent boots are ~10 seconds.
+
+After the logs settle, the backend is at:
+
+- API — `http://localhost:8000/api/`
+- Admin — `http://localhost:8000/admin/` (login with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env.docker`)
+- Healthcheck — `http://localhost:8000/api/healthz/`
+- Postgres — `localhost:5433` (5433 to avoid clashing with any local Postgres install; useful for connecting TablePlus / DBeaver / pgAdmin)
+
+### What runs inside
+
+| Service | Image | Port (host) | Purpose |
+|---|---|---|---|
+| `db` | `pgvector/pgvector:pg16` | `5433` | Postgres 16 with pgvector preinstalled |
+| `backend` | Built from `./Dockerfile` | `8000` | Django + LangGraph agents |
+
+### Code changes auto-reload
+
+The `backend` service mounts the local code directory inside the container, so editing a `.py` file on your host triggers Django's `runserver` auto-reload — no rebuild needed.
+
+### Common Docker commands
+
+```powershell
+docker compose up                    # start (foreground)
+docker compose up -d                 # start (detached / background)
+docker compose down                  # stop containers (keep data volume)
+docker compose down -v               # stop containers AND delete the DB volume
+docker compose logs -f backend       # tail backend logs
+docker compose exec backend bash     # shell into the backend container
+docker compose exec db psql -U postgres agent_sql   # psql into the DB
+docker compose build --no-cache backend             # force-rebuild the backend image
+```
+
+### Switching DEBUG modes inside Docker
+
+The same image runs `runserver` in dev and `gunicorn` in prod — chosen at startup by the `DEBUG` env var.
+
+```
+# In .env.docker
+DEBUG=True     # → runserver (hot reload)
+DEBUG=False    # → gunicorn (production server, no reload)
+```
+
+Restart the container after changing: `docker compose up -d --force-recreate backend`.
+
+---
+
 ## Deployment (Render)
 
 The repo includes a `render.yaml` Blueprint. To deploy:
