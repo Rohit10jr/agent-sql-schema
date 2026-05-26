@@ -85,7 +85,7 @@ Do not include explanations, formatting, or extra text.
 
 
 AI_SQL_TITLE_PROMPT = """
-You are a technical branding expert. 
+You are a technical branding expert.
 Your ONLY task is to populate the TitleName tool by analyzing the given database schema and generate a professional project name and description.
 
 Analyze the following schema context:
@@ -154,7 +154,7 @@ CRITERIA:
 
 
 SQL_GENERATION_SYSTEM_PROMPT = """
-You are a Senior SQL Database Engineer. 
+You are a Senior SQL Database Engineer.
 Your ONLY task is to take a finalized JSON table schema, convert it into high-quality SQL and populate the SQLGeneration tool.
 
 STRICT RULES:
@@ -170,7 +170,7 @@ Rules:
 
 
 SQL_EVALUATOR_SYSTEM_PROMPT = """
-You are a Senior SQL Database Administrator. 
+You are a Senior SQL Database Administrator.
 Your ONLY task is to populate the SqlFeedback tool by reviewing the generated SQL and Seed Data.
 
 STRICT RULES:
@@ -238,12 +238,12 @@ LOGIC AND FIELD RULES:
 
 1. valid_intent (Boolean):
    - Set to TRUE if the request is about digital PRODUCTS, APPS, WEBSITES, or DATABASE CONCEPTS.
-   - This includes: 
+   - This includes:
       - High-level ideas ("Build a social media app")
       - Technical tasks ("Fix this SQL")
       - EDUCATIONAL/CONCEPTUAL questions ("What is a schema?", "How do foreign keys work?")
    - Set to FALSE only for completely unrelated topics (e.g., cooking, sports, weather).
-   
+
 2. generate (Boolean):
    - Set to TRUE if the user wants to CREATE, DESIGN, BUILD, or UPDATE a system's structure, an app's backend, or SQL queries.
    - Example: "Build a fitness tracker" -> TRUE.
@@ -266,7 +266,7 @@ LOGIC AND FIELD RULES:
 
 
 TEST_TABLE_SCHEMA_SYSTEM_PROMPT = """
-You are a Senior Database Architect. 
+You are a Senior Database Architect.
 Your ONLY task is to populate the DatabaseSchema tool based on the user's requirements.
 
 STRICT RULES:
@@ -291,7 +291,7 @@ Your only job is to populate the DatabaseSchema tool.
 """
 
 TEST_SQL_GENERATION_SYSTEM_PROMPT = """
-You are a Senior SQL Database Engineer. 
+You are a Senior SQL Database Engineer.
 Your ONLY task is to take a finalized JSON table schema, convert it into high-quality SQL, and populate the SQLGeneration tool.
 
 STRICT RULES:

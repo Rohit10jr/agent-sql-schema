@@ -26,7 +26,6 @@ from typing import Literal
 
 from django.conf import settings
 from langchain_core.messages import (
-    AIMessage,
     AnyMessage,
     HumanMessage,
     RemoveMessage,
@@ -43,6 +42,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import Annotated, TypedDict
 
 from core.services import memory as ltm
+
 # Reuse the IR + validators from the agentic graph so the produced artifact
 # shape is identical → fair comparison. Importing pure data, no agent code.
 from core.services.schema_graph import (
@@ -114,7 +114,7 @@ class SchemaState(TypedDict):
 class RouterDecision(BaseModel):
     intent: Literal["schema", "sql", "explain"] = Field(
         description=(
-            'Pick ONE: '
+            "Pick ONE: "
             '"schema" — create or refine the database schema (will also (re)generate SQL); '
             '"sql" — regenerate SQL only from the EXISTING schema (no schema change); '
             '"explain" — a question or clarification with no artifact change.'
@@ -128,9 +128,15 @@ def _build_bundle(model: str) -> dict:
     # streaming-tool-call JSON-parse bug. The `respond` LLM has no tools, so it
     # can stream text tokens normally.
     return {
-        "router":  _groq(model, max_tokens=200,  disable_streaming=True).with_structured_output(RouterDecision),
-        "schema":  _groq(model, max_tokens=2500, disable_streaming=True).with_structured_output(DatabaseSchema),
-        "sql":     _groq(model, max_tokens=2000, disable_streaming=True).with_structured_output(SQLGeneration),
+        "router": _groq(model, max_tokens=200, disable_streaming=True).with_structured_output(
+            RouterDecision
+        ),
+        "schema": _groq(model, max_tokens=2500, disable_streaming=True).with_structured_output(
+            DatabaseSchema
+        ),
+        "sql": _groq(model, max_tokens=2000, disable_streaming=True).with_structured_output(
+            SQLGeneration
+        ),
         "respond": _groq(model, max_tokens=600),  # plain text, streamable
     }
 
@@ -267,10 +273,12 @@ def route_intent(state: SchemaState, runtime: Runtime[SchemaContext]) -> dict:
         "Pick the intent: schema | sql | explain."
     )
     try:
-        result = router.invoke([
-            SystemMessage(content=ROUTER_PROMPT),
-            HumanMessage(content=user_msg),
-        ])
+        result = router.invoke(
+            [
+                SystemMessage(content=ROUTER_PROMPT),
+                HumanMessage(content=user_msg),
+            ]
+        )
         return {"intent": result.intent}
     except Exception:
         logger.exception("Hybrid router failed; defaulting to explain")
@@ -293,10 +301,12 @@ def generate_schema_node(state: SchemaState, runtime: Runtime[SchemaContext]) ->
         )
 
     def _generate(extra: str = "") -> tuple[dict, list[str]]:
-        result = generator.invoke([
-            SystemMessage(content=SCHEMA_TOOL_PROMPT),
-            HumanMessage(content=base_prompt + extra),
-        ])
+        result = generator.invoke(
+            [
+                SystemMessage(content=SCHEMA_TOOL_PROMPT),
+                HumanMessage(content=base_prompt + extra),
+            ]
+        )
         payload = result.model_dump()
         # Honor the generator's chosen dialect; fall back to requested.
         payload["dialect"] = payload.get("dialect") or dialect
@@ -304,9 +314,8 @@ def generate_schema_node(state: SchemaState, runtime: Runtime[SchemaContext]) ->
 
     payload, issues = _generate()
     if issues:
-        retry_extra = (
-            "\n\nPrevious attempt had validation issues — FIX them:\n"
-            + "\n".join(f"- {i}" for i in issues)
+        retry_extra = "\n\nPrevious attempt had validation issues — FIX them:\n" + "\n".join(
+            f"- {i}" for i in issues
         )
         payload, issues = _generate(retry_extra)
 
@@ -328,9 +337,7 @@ def generate_sql_node(state: SchemaState, runtime: Runtime[SchemaContext]) -> di
 
     bundle = _bundle_for(runtime.context.model)
     generator = bundle["sql"]
-    dialect = (
-        state.get("dialect") or schema_payload.get("dialect") or DEFAULT_DIALECT
-    )
+    dialect = state.get("dialect") or schema_payload.get("dialect") or DEFAULT_DIALECT
 
     base_prompt = (
         f"Dialect: {dialect}\n"
@@ -339,17 +346,18 @@ def generate_sql_node(state: SchemaState, runtime: Runtime[SchemaContext]) -> di
     )
 
     def _generate(extra: str = ""):
-        result = generator.invoke([
-            SystemMessage(content=SQL_TOOL_PROMPT),
-            HumanMessage(content=base_prompt + extra),
-        ])
+        result = generator.invoke(
+            [
+                SystemMessage(content=SQL_TOOL_PROMPT),
+                HumanMessage(content=base_prompt + extra),
+            ]
+        )
         return result, validate_sql_payload(result.sql, result.seed_data, dialect)
 
     result, issues = _generate()
     if issues:
-        retry_extra = (
-            "\n\nPrevious attempt had issues — FIX them:\n"
-            + "\n".join(f"- {i}" for i in issues)
+        retry_extra = "\n\nPrevious attempt had issues — FIX them:\n" + "\n".join(
+            f"- {i}" for i in issues
         )
         result, issues = _generate(retry_extra)
 
@@ -384,9 +392,7 @@ def respond_node(state: SchemaState, runtime: Runtime[SchemaContext]) -> dict:
     if intent == "sql" and state.get("sql"):
         notes.append("You just (re)generated SQL DDL + seed data; shown in the artifact panel.")
     if state.get("validation_issues"):
-        notes.append(
-            "Outstanding validation issues: " + "; ".join(state["validation_issues"])
-        )
+        notes.append("Outstanding validation issues: " + "; ".join(state["validation_issues"]))
 
     query = _latest_user_text(state["messages"])
 

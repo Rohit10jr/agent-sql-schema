@@ -7,23 +7,23 @@ from io import StringIO
 from uuid import uuid4
 
 from django.http import StreamingHttpResponse
-from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from core.models import ChatSession, Connection, Result
 from core.serializers import ResultOutSerializer
-from core.services.connection import ConnectionService, ConnectionError
+from core.services.connection import ConnectionError, ConnectionService
 from core.services.sql_graph import run_sql_agent_sync
-from core.services.sql_toolkit import execute_sql_query, fill_chart_with_data, ChartType
-from core.utils import generate_and_save_title
+from core.services.sql_toolkit import ChartType, execute_sql_query, fill_chart_with_data
 
 logger = logging.getLogger(__name__)
 
 
 class SQLQueryView(APIView):
     """POST /api/conversation/<thread_id>/query/ — Takes a natural-language SQL question for a conversation, runs the SQL agent on that conversation’s linked database, stores structured results, and returns the generated events."""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, thread_id):
@@ -40,7 +40,10 @@ class SQLQueryView(APIView):
             return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
 
         if not chat.connection:
-            return Response({"error": "This conversation has no database connection"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "This conversation has no database connection"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         connection = chat.connection
 
@@ -128,6 +131,7 @@ class SQLQueryView(APIView):
 # [!!] mostly not required because langchain stores all the tools results as well.
 class ThreadResultsView(APIView):
     """GET /api/conversation/<thread_id>/results/ —  Returns all saved Result records for a given conversation thread in chronological order."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request, thread_id):
@@ -137,15 +141,18 @@ class ThreadResultsView(APIView):
             return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
 
         results = Result.objects.filter(thread_id=thread_id).order_by("created_at")
-        return Response({
-            "data": ResultOutSerializer(results, many=True).data,
-        })
+        return Response(
+            {
+                "data": ResultOutSerializer(results, many=True).data,
+            }
+        )
 
 
-# [!!] check how to do this in langchain DB, 
+# [!!] check how to do this in langchain DB,
 # decide if this is required or not
 class RunSQLView(APIView):
     """POST /api/conversation/<thread_id>/run-sql/ — Executes a raw read-only SQL query directly against the database linked to a conversation and returns columns and rows."""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, thread_id):
@@ -161,27 +168,35 @@ class RunSQLView(APIView):
             return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
 
         if not chat.connection:
-            return Response({"error": "This conversation has no database connection"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "This conversation has no database connection"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             db = ConnectionService.get_sql_database(chat.connection)
             result = execute_sql_query(db, sql)
-            return Response({
-                "data": {
-                    "columns": result["columns"],
-                    "rows": result["rows"],
-                    "linked_id": linked_id,
+            return Response(
+                {
+                    "data": {
+                        "columns": result["columns"],
+                        "rows": result["rows"],
+                        "linked_id": linked_id,
+                    }
                 }
-            })
+            )
         except ConnectionError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({"error": f"SQL execution failed: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": f"SQL execution failed: {e}"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 # [!!] not required, we will create thread id directly in main view
 class SQLConversationCreateView(APIView):
     """POST /api/sql-conversation/ — Creates a new chat session linked to one of the user’s saved database connections and returns its thread_id"""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -189,7 +204,9 @@ class SQLConversationCreateView(APIView):
         name = request.data.get("name", "New Chat")
 
         if not connection_id:
-            return Response({"error": "connection_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "connection_id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             connection = Connection.objects.get(id=connection_id, user=request.user)
@@ -205,19 +222,23 @@ class SQLConversationCreateView(APIView):
             title=name,
         )
 
-        return Response({
-            "data": {
-                "thread_id": chat.thread_id,
-                "connection_id": str(connection.id),
-                "title": chat.title,
-                "created_at": chat.created_at.isoformat(),
-            }
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "data": {
+                    "thread_id": chat.thread_id,
+                    "connection_id": str(connection.id),
+                    "title": chat.title,
+                    "created_at": chat.created_at.isoformat(),
+                }
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # [!!] mostly not required
 class SQLResultUpdateView(APIView):
     """PATCH /api/result/sql/<id>/ — Updates a saved SQL query string result and can optionally rerun it to refresh a linked chart."""
+
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, result_id):
@@ -278,7 +299,12 @@ class SQLResultUpdateView(APIView):
             content = json.loads(sql_result.content)
             chart_content = json.loads(chart_result.content)
 
-            query_data = execute_sql_query(db, content["sql"], for_chart=True, chart_type=ChartType[chart_content.get("chart_type", "bar")])
+            query_data = execute_sql_query(
+                db,
+                content["sql"],
+                for_chart=True,
+                chart_type=ChartType[chart_content.get("chart_type", "bar")],
+            )
             updated_json = fill_chart_with_data(
                 chart_content["chartjs_json"],
                 query_data["columns"],
@@ -299,36 +325,49 @@ class SQLResultUpdateView(APIView):
 # [!!] for now, not required
 class ChartRefreshView(APIView):
     """PATCH /api/result/chart/<id>/refresh/ — Re-runs the SQL behind a saved chart result and updates the chart JSON with fresh database data."""
+
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, result_id):
         try:
-            chart_result = Result.objects.get(id=result_id, type=Result.ResultType.CHART_GENERATION_RESULT)
+            chart_result = Result.objects.get(
+                id=result_id, type=Result.ResultType.CHART_GENERATION_RESULT
+            )
         except Result.DoesNotExist:
             return Response({"error": "Chart result not found"}, status=status.HTTP_404_NOT_FOUND)
 
         chart_content = json.loads(chart_result.content)
 
         if not chart_result.linked_id:
-            return Response({"error": "Chart has no linked SQL result"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Chart has no linked SQL result"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Follow the chain: chart → run result → SQL string
         try:
-            sql_result = Result.objects.get(id=chart_result.linked_id, type=Result.ResultType.SQL_QUERY_STRING)
+            sql_result = Result.objects.get(
+                id=chart_result.linked_id, type=Result.ResultType.SQL_QUERY_STRING
+            )
         except Result.DoesNotExist:
-            return Response({"error": "Linked SQL result not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Linked SQL result not found"}, status=status.HTTP_404_NOT_FOUND
+            )
 
         sql_content = json.loads(sql_result.content)
 
         # Get the database connection
         chat = ChatSession.objects.filter(thread_id=chart_result.thread_id).first()
         if not chat or not chat.connection:
-            return Response({"error": "No database connection found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "No database connection found"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             db = ConnectionService.get_sql_database(chat.connection)
             chart_type = chart_content.get("chart_type", "bar")
-            query_data = execute_sql_query(db, sql_content["sql"], for_chart=True, chart_type=ChartType[chart_type])
+            query_data = execute_sql_query(
+                db, sql_content["sql"], for_chart=True, chart_type=ChartType[chart_type]
+            )
             updated_json = fill_chart_with_data(
                 chart_content["chartjs_json"],
                 query_data["columns"],
@@ -340,19 +379,24 @@ class ChartRefreshView(APIView):
             chart_result.content = json.dumps(chart_content)
             chart_result.save()
 
-            return Response({
-                "data": {
-                    "chartjs_json": updated_json,
-                    "created_at": chart_result.created_at.isoformat(),
+            return Response(
+                {
+                    "data": {
+                        "chartjs_json": updated_json,
+                        "created_at": chart_result.created_at.isoformat(),
+                    }
                 }
-            })
+            )
         except Exception as e:
-            return Response({"error": f"Chart refresh failed: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": f"Chart refresh failed: {e}"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 # [!!] check how to do this with the Langchain Message DB
 class ExportCSVView(APIView):
     """GET /api/result/<id>/export-csv/ — Re-executes a saved SQL query and streams the current result as a downloadable CSV file."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request, result_id):
@@ -366,7 +410,9 @@ class ExportCSVView(APIView):
 
         chat = ChatSession.objects.filter(thread_id=result.thread_id).first()
         if not chat or not chat.connection:
-            return Response({"error": "No database connection found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "No database connection found"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             db = ConnectionService.get_sql_database(chat.connection)
@@ -393,11 +439,15 @@ class ExportCSVView(APIView):
                 yield buffer.getvalue()
 
             response = StreamingHttpResponse(csv_generator(), content_type="text/csv")
-            response["Content-Disposition"] = f"attachment; filename=export_{str(result_id)[:8]}.csv"
+            response["Content-Disposition"] = (
+                f"attachment; filename=export_{str(result_id)[:8]}.csv"
+            )
             return response
 
         except Exception as e:
-            return Response({"error": f"CSV export failed: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": f"CSV export failed: {e}"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 def _safe_serialize(obj):

@@ -20,25 +20,24 @@ Architecture:
         - ("done", str)         : Final AI message text
 """
 
-import json
 import logging
 import os
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from psycopg_pool import ConnectionPool
 from typing_extensions import TypedDict
 
 from core.models import Connection
 from core.services.connection import ConnectionService
-from core.services.sql_toolkit import build_sql_tools
 from core.services.sql_prompt import build_system_prompt
+from core.services.sql_toolkit import build_sql_tools
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +46,13 @@ DB_URI = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5432/ag
 
 # ── State ───────────────────────────────────────────────────────────
 
+
 class SQLAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
 
 # ── Graph Builder ───────────────────────────────────────────────────
+
 
 def build_sql_agent(connection: Connection, secure_data: bool = False):
     """Build a compiled LangGraph SQL agent for a given database connection."""
@@ -115,6 +116,7 @@ def build_sql_agent(connection: Connection, secure_data: bool = False):
 
 # ── Query Helper (sync) ─────────────────────────────────────────────
 
+
 def run_sql_agent_sync(
     connection: Connection,
     query: str,
@@ -134,7 +136,7 @@ def run_sql_agent_sync(
         - "done": Final AI message text
     """
     # returns graph object
-    # [??] but why initialize it for every call ? unlike in my normal ai call view 
+    # [??] but why initialize it for every call ? unlike in my normal ai call view
     app = build_sql_agent(connection, secure_data=secure_data)
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -174,24 +176,35 @@ def run_sql_agent_sync(
                             tool_content = str(msg.content) if msg.content else ""
 
                             # Emit structured results for specific tools
-                            if tool_name == "run_sql_query" and not tool_content.startswith("ERROR"):
-                                yield ("result", {
-                                    "type": "SQL_QUERY_RUN_RESULT",
-                                    "content": {"raw": tool_content},
-                                    "id": uuid4().hex,
-                                })
+                            if tool_name == "run_sql_query" and not tool_content.startswith(
+                                "ERROR"
+                            ):
+                                yield (
+                                    "result",
+                                    {
+                                        "type": "SQL_QUERY_RUN_RESULT",
+                                        "content": {"raw": tool_content},
+                                        "id": uuid4().hex,
+                                    },
+                                )
                             elif tool_name == "generate_chart" and "CHART_JSON:" in tool_content:
                                 chart_json = tool_content.split("CHART_JSON:", 1)[1]
-                                yield ("result", {
-                                    "type": "CHART_GENERATION_RESULT",
-                                    "content": {"chartjs_json": chart_json},
-                                    "id": uuid4().hex,
-                                })
+                                yield (
+                                    "result",
+                                    {
+                                        "type": "CHART_GENERATION_RESULT",
+                                        "content": {"chartjs_json": chart_json},
+                                        "id": uuid4().hex,
+                                    },
+                                )
 
-                            yield ("tool_result", {
-                                "name": tool_name,
-                                "content": tool_content[:500],
-                            })
+                            yield (
+                                "tool_result",
+                                {
+                                    "name": tool_name,
+                                    "content": tool_content[:500],
+                                },
+                            )
 
                 elif node_name == "agent":
                     # Agent node completed -- check for tool calls
@@ -199,10 +212,13 @@ def run_sql_agent_sync(
                     for msg in messages:
                         if hasattr(msg, "tool_calls") and msg.tool_calls:
                             for tc in msg.tool_calls:
-                                yield ("tool_start", {
-                                    "name": tc["name"],
-                                    "args": tc.get("args", {}),
-                                })
+                                yield (
+                                    "tool_start",
+                                    {
+                                        "name": tc["name"],
+                                        "args": tc.get("args", {}),
+                                    },
+                                )
 
                                 # Extract structured results from SQL tool calls
                                 if tc["name"] == "run_sql_query":
@@ -210,11 +226,14 @@ def run_sql_agent_sync(
                                     sql = args.get("query", "")
                                     for_chart = args.get("for_chart", False)
                                     if sql:
-                                        yield ("result", {
-                                            "type": "SQL_QUERY_STRING",
-                                            "content": {"sql": sql, "for_chart": for_chart},
-                                            "id": uuid4().hex,
-                                        })
+                                        yield (
+                                            "result",
+                                            {
+                                                "type": "SQL_QUERY_STRING",
+                                                "content": {"sql": sql, "for_chart": for_chart},
+                                                "id": uuid4().hex,
+                                            },
+                                        )
 
     # Get the final AI message from checkpointer
     final_state = app.get_state(config)

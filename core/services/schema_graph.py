@@ -265,8 +265,7 @@ def validate_schema_payload(schema: dict) -> list[str]:
                 issues.append(f"Foreign key {name}.{col} references missing table {ref_table}.")
             elif ref_col not in table_columns[ref_table]:
                 issues.append(
-                    f"Foreign key {name}.{col} references missing column "
-                    f"{ref_table}.{ref_col}."
+                    f"Foreign key {name}.{col} references missing column " f"{ref_table}.{ref_col}."
                 )
 
         for index in table.get("indexes") or []:
@@ -284,7 +283,9 @@ def _first_sql_keyword(statement: str) -> str:
     return stripped.split(None, 1)[0].upper() if stripped else ""
 
 
-def validate_sql_payload(sql: str, seed_data: str = "", dialect: str = DEFAULT_DIALECT) -> list[str]:
+def validate_sql_payload(
+    sql: str, seed_data: str = "", dialect: str = DEFAULT_DIALECT
+) -> list[str]:
     """Parse generated SQL and return issues. Empty list means valid enough."""
     issues: list[str] = []
     read_dialect = _sqlglot_read_dialect(dialect)

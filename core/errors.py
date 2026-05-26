@@ -18,11 +18,11 @@ from typing import Any, Optional
 
 @dataclass(frozen=True, slots=True)
 class ErrorInfo:
-    code: str                              # stable identifier — frontend dispatches on this
-    message: str                           # user-facing one-liner
-    retryable: bool                        # show a retry button?
-    retry_after_seconds: Optional[float]   # countdown for RATE_LIMIT
-    http_status: int                       # for non-stream paths returning DRF Response
+    code: str  # stable identifier — frontend dispatches on this
+    message: str  # user-facing one-liner
+    retryable: bool  # show a retry button?
+    retry_after_seconds: Optional[float]  # countdown for RATE_LIMIT
+    http_status: int  # for non-stream paths returning DRF Response
 
     def to_sse(self, *, run_id: str | None = None, node: str | None = None) -> dict:
         return {
@@ -129,6 +129,7 @@ def classify_error(e: BaseException) -> ErrorInfo:
     # ── Pydantic (structured-output validation) ───────────────────────
     try:
         import pydantic
+
         if isinstance(e, pydantic.ValidationError):
             return ErrorInfo(
                 code="SCHEMA",
@@ -143,6 +144,7 @@ def classify_error(e: BaseException) -> ErrorInfo:
     # ── Database ──────────────────────────────────────────────────────
     try:
         import psycopg
+
         if isinstance(e, psycopg.OperationalError):
             return ErrorInfo(
                 code="DB_DOWN",
@@ -157,6 +159,7 @@ def classify_error(e: BaseException) -> ErrorInfo:
     # ── Network (httpx-level, when SDK didn't wrap) ───────────────────
     try:
         import httpx
+
         if isinstance(e, (httpx.ConnectError, httpx.ReadTimeout)):
             return ErrorInfo(
                 code="PROVIDER_NETWORK",

@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_core.tools import tool
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -41,22 +41,38 @@ def truncate_value(content: Any, length: int = 200) -> Any:
         return content
     if len(content) <= length:
         return content
-    return content[:length - 3] + "..."
+    return content[: length - 3] + "..."
 
 
-FORBIDDEN_KEYWORDS = {"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "REPLACE", "MERGE", "GRANT", "REVOKE"}
+FORBIDDEN_KEYWORDS = {
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "TRUNCATE",
+    "CREATE",
+    "REPLACE",
+    "MERGE",
+    "GRANT",
+    "REVOKE",
+}
 
 
 def validate_read_only(query: str) -> None:
     """Raise ValueError if the query is not a read-only SELECT statement."""
     first_keyword = query.strip().split()[0].upper() if query.strip() else ""
     if first_keyword in FORBIDDEN_KEYWORDS:
-        raise ValueError(f"{first_keyword} statements are not allowed. Only SELECT queries are permitted.")
+        raise ValueError(
+            f"{first_keyword} statements are not allowed. Only SELECT queries are permitted."
+        )
 
 
-def execute_sql_query(db: SQLDatabase, query: str, for_chart: bool = False, chart_type: Optional[ChartType] = None) -> dict:
+def execute_sql_query(
+    db: SQLDatabase, query: str, for_chart: bool = False, chart_type: Optional[ChartType] = None
+) -> dict:
     """Execute SQL and return {"columns": [...], "rows": [...]}."""
-    validate_read_only(query) 
+    validate_read_only(query)
 
     with db._engine.connect() as conn:
         result = conn.execute(text(query))
@@ -68,7 +84,12 @@ def execute_sql_query(db: SQLDatabase, query: str, for_chart: bool = False, char
     for row in rows:
         truncated_rows.append([truncate_value(cell) for cell in row])
 
-    if for_chart and chart_type in (ChartType.bar, ChartType.line, ChartType.doughnut, ChartType.scatter):
+    if for_chart and chart_type in (
+        ChartType.bar,
+        ChartType.line,
+        ChartType.doughnut,
+        ChartType.scatter,
+    ):
         if not truncated_rows:
             raise ValueError("No data returned from the query.")
         if len(truncated_rows[0]) != 2:
@@ -114,7 +135,9 @@ def build_sql_tools(db: SQLDatabase, secure_data: bool = False):
         NEVER run this without calling get_table_schema first!"""
         # Block DML/DDL statements — only SELECT is allowed
         try:
-            validate_read_only(query) # [!!] redundant with execute_sql_query but provides faster feedback to the LLM
+            validate_read_only(
+                query
+            )  # [!!] redundant with execute_sql_query but provides faster feedback to the LLM
         except ValueError as e:
             return f"ERROR: {e}"
 
@@ -167,15 +190,18 @@ def build_sql_tools(db: SQLDatabase, secure_data: bool = False):
 
 # ── Chart Config Builder ────────────────────────────────────────────
 
+
 def _build_chart_config(chart_type: ChartType, title: str) -> dict:
     """Build a Chart.js config template. Data will be filled in by the frontend or result service."""
     base = {
         "type": chart_type.value,
         "data": {
             "labels": [],
-            "datasets": [{
-                "data": [],
-            }],
+            "datasets": [
+                {
+                    "data": [],
+                }
+            ],
         },
         "options": {
             "plugins": {

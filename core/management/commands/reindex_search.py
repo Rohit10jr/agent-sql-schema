@@ -21,8 +21,8 @@ class Command(BaseCommand):
         # Imported here, not at module load — pulling in the agents triggers
         # heavy LangGraph / LLM imports that management commands shouldn't pay
         # for unless this command actually runs.
-        from core.sql_agent import sql_agent
         from core.schema_agent import schema_agent
+        from core.sql_agent import sql_agent
 
         sql_messages = self._reindex(
             "SQL chats",
@@ -37,9 +37,11 @@ class Command(BaseCommand):
             schema_agent,
         )
 
-        self.stdout.write(self.style.SUCCESS(
-            f"Done. Indexed {sql_messages} SQL + {schema_messages} schema messages."
-        ))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Done. Indexed {sql_messages} SQL + {schema_messages} schema messages."
+            )
+        )
 
     def _reindex(self, label, rows, key_fn, agent) -> int:
         total = 0

@@ -100,12 +100,14 @@ def _ai_parts(raw: Any) -> list[dict]:
             tc_name = getattr(tc, "name", "unknown")
             tc_id = getattr(tc, "id", "")
             tc_args = getattr(tc, "args", {})
-        parts.append({
-            "type": "tool-call",
-            "tool_call_id": str(tc_id),
-            "tool_name": str(tc_name),
-            "args": tc_args,
-        })
+        parts.append(
+            {
+                "type": "tool-call",
+                "tool_call_id": str(tc_id),
+                "tool_name": str(tc_name),
+                "args": tc_args,
+            }
+        )
 
     # Final text content (if non-empty)
     content = _msg_attr(raw, "content", "") or ""

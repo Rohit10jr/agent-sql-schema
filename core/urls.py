@@ -1,119 +1,130 @@
 from django.urls import path
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-    TokenVerifyView
-)
+from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
-from . import views
-from . import sql_views
-from . import schema_views
-from . import memory_views
-from .schema_views import SchemaProjectListView, SchemaProjectDetailView, SchemaProjectUpdateSerializer, GetSQLVariantView
-from .schema_agent import SchemaAgent  # agentic design — kept loaded; schema_views imports from this module
-from .schema_agent_hybrid import SchemaAgentHybrid  # hybrid workflow design
-from .streaming import StreamStateUpdateView, StreamTokenView, StreamCustomView, StreamCommonView, StreamGuardrailView, StreamHumanLoopView, StreamSubAgentsView
+from . import memory_views, views
 from .connection_views import (
+    ConnectionDetailView,
+    ConnectionListView,
+    ConnectionRefreshView,
     ConnectView,
     FileConnectView,
-    ConnectionListView,
-    ConnectionDetailView,
-    ConnectionRefreshView,
     RestoreSampleConnectionsView,
 )
-from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView
-from .sql_agent import SqlAgent
-from .run_views import RunCancelView
 from .health_views import healthz
-
-
+from .run_views import RunCancelView
+from .schema_agent_hybrid import SchemaAgentHybrid  # hybrid workflow design
+from .schema_views import (
+    GetSQLVariantView,
+    SchemaProjectDetailView,
+    SchemaProjectListView,
+)
+from .sql_agent import SqlAgent
+from .sql_views import (
+    ChartRefreshView,
+    ExportCSVView,
+    RunSQLView,
+    SQLConversationCreateView,
+    SQLQueryView,
+    SQLResultUpdateView,
+    ThreadResultsView,
+)
+from .streaming import (
+    StreamCommonView,
+    StreamCustomView,
+    StreamGuardrailView,
+    StreamHumanLoopView,
+    StreamStateUpdateView,
+    StreamSubAgentsView,
+    StreamTokenView,
+)
 
 urlpatterns = [
     # JWT auth
-    path('token/', views.EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('token/verify/', TokenVerifyView.as_view(), name='token_verify'),
-
+    path("token/", views.EmailTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
     # User
-    path('signup/', views.signup, name='signup'),
-    path('email/verify/', views.email_verify, name='email_verify'),
-    path('email/verify/resend/', views.resend_verification, name='resend_verification'),
-    path('logout/', views.logout, name='logout'),
-    path('whoami/', views.current_user, name='current_user'),
-    path('update-profile/', views.update_user_profile, name='update_profile'),
-
+    path("signup/", views.signup, name="signup"),
+    path("email/verify/", views.email_verify, name="email_verify"),
+    path("email/verify/resend/", views.resend_verification, name="resend_verification"),
+    path("logout/", views.logout, name="logout"),
+    path("whoami/", views.current_user, name="current_user"),
+    path("update-profile/", views.update_user_profile, name="update_profile"),
     # Password reset (forgot password)
-    path('password/reset/', views.password_reset, name='password_reset'),
-    path('password/reset/validate/', views.password_reset_validate, name='password_reset_validate'),
-    path('password/reset/confirm/', views.password_reset_confirm, name='password_reset_confirm'),
-    
+    path("password/reset/", views.password_reset, name="password_reset"),
+    path("password/reset/validate/", views.password_reset_validate, name="password_reset_validate"),
+    path("password/reset/confirm/", views.password_reset_confirm, name="password_reset_confirm"),
     # Password change (authenticated)
-    path('password/change/', views.password_change, name='password_change'),
-    
+    path("password/change/", views.password_change, name="password_change"),
     # generic chat session
     path("threads/<str:thread_id>/history/", views.ChatHistoryView.as_view()),
     path("threads/", views.ChatListView.as_view()),
     path("threads/<str:thread_id>/", views.ChatDetailView.as_view()),
     # path("threads/<str:thread_id>/delete/", views.ChatDeleteView.as_view()),
-
     # Bulk cleanup — removes every non-starred chat AND non-starred schema
     # project for the caller. Lives outside /threads/ now because it spans
     # both resources.
     path("cleanup/non-starred/", views.BulkDeleteNonStarredView.as_view()),
-    path('aichat/', views.AiChatView.as_view(), name='AiChatView'),
-    
+    path("aichat/", views.AiChatView.as_view(), name="AiChatView"),
     # Connections
-    path('connect/', ConnectView.as_view(), name='connect'),
-    path('connect/file/', FileConnectView.as_view(), name='connect_file'),
-    path('connections/', ConnectionListView.as_view(), name='connections'),
-    path('connections/restore-samples/', RestoreSampleConnectionsView.as_view(), name='connections_restore_samples'),
-    path('connection/<uuid:connection_id>/', ConnectionDetailView.as_view(), name='connection_detail'),
-    path('connection/<uuid:connection_id>/refresh/', ConnectionRefreshView.as_view(), name='connection_refresh'),
-
+    path("connect/", ConnectView.as_view(), name="connect"),
+    path("connect/file/", FileConnectView.as_view(), name="connect_file"),
+    path("connections/", ConnectionListView.as_view(), name="connections"),
+    path(
+        "connections/restore-samples/",
+        RestoreSampleConnectionsView.as_view(),
+        name="connections_restore_samples",
+    ),
+    path(
+        "connection/<uuid:connection_id>/", ConnectionDetailView.as_view(), name="connection_detail"
+    ),
+    path(
+        "connection/<uuid:connection_id>/refresh/",
+        ConnectionRefreshView.as_view(),
+        name="connection_refresh",
+    ),
     # Token usage
-    path('usage/', views.UsageView.as_view(), name='usage'),
-
+    path("usage/", views.UsageView.as_view(), name="usage"),
     # Chat search (full-text across SQL chats + schema projects)
-    path('search/', views.ChatSearchView.as_view(), name='chat_search'),
-
+    path("search/", views.ChatSearchView.as_view(), name="chat_search"),
     # Long-term memory (user-facing CRUD over what the agents remember)
-    path('memories/', memory_views.MemoryListCreateView.as_view(), name='memories'),
-    path('memories/<str:memory_id>/', memory_views.MemoryDetailView.as_view(), name='memory_detail'),
-
+    path("memories/", memory_views.MemoryListCreateView.as_view(), name="memories"),
+    path(
+        "memories/<str:memory_id>/", memory_views.MemoryDetailView.as_view(), name="memory_detail"
+    ),
     # SQL Conversations
-    path('sql-agent/', SqlAgent.as_view(), name='sql_agent'),
-    path('sql-conversation/', SQLConversationCreateView.as_view(), name='sql_conversation_create'),
-    path('conversation/<str:thread_id>/query/', SQLQueryView.as_view(), name='sql_query'),
-    path('conversation/<str:thread_id>/results/', ThreadResultsView.as_view(), name='thread_results'),
-    path('conversation/<str:thread_id>/run-sql/', RunSQLView.as_view(), name='run_sql'),
-
+    path("sql-agent/", SqlAgent.as_view(), name="sql_agent"),
+    path("sql-conversation/", SQLConversationCreateView.as_view(), name="sql_conversation_create"),
+    path("conversation/<str:thread_id>/query/", SQLQueryView.as_view(), name="sql_query"),
+    path(
+        "conversation/<str:thread_id>/results/", ThreadResultsView.as_view(), name="thread_results"
+    ),
+    path("conversation/<str:thread_id>/run-sql/", RunSQLView.as_view(), name="run_sql"),
     # SCHEMA Agent
     # path("variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
     # path('schema-agent/', SchemaAgent.as_view(), name='schema_view'),         # agentic
-    path('schema-agent/', SchemaAgentHybrid.as_view(), name='schema_view'),    # hybrid workflow
+    path("schema-agent/", SchemaAgentHybrid.as_view(), name="schema_view"),  # hybrid workflow
     path("schema-projects/", SchemaProjectListView.as_view(), name="ai-project-list"),
-    path("schema-project/<slug:slug>/", SchemaProjectDetailView.as_view(), name="ai-project-detail"),
+    path(
+        "schema-project/<slug:slug>/", SchemaProjectDetailView.as_view(), name="ai-project-detail"
+    ),
     path("schema-variants/", GetSQLVariantView.as_view(), name="ai-project-variants"),
-
-
     # Results
-    path('result/sql/<uuid:result_id>/', SQLResultUpdateView.as_view(), name='result_sql_update'),
-    path('result/chart/<uuid:result_id>/refresh/', ChartRefreshView.as_view(), name='chart_refresh'),
-    path('result/<uuid:result_id>/export-csv/', ExportCSVView.as_view(), name='export_csv'),
-
+    path("result/sql/<uuid:result_id>/", SQLResultUpdateView.as_view(), name="result_sql_update"),
+    path(
+        "result/chart/<uuid:result_id>/refresh/", ChartRefreshView.as_view(), name="chart_refresh"
+    ),
+    path("result/<uuid:result_id>/export-csv/", ExportCSVView.as_view(), name="export_csv"),
     # Cancel an in-flight schema/SQL agent run
-    path('runs/<str:run_id>/cancel/', RunCancelView.as_view(), name='run_cancel'),
-
+    path("runs/<str:run_id>/cancel/", RunCancelView.as_view(), name="run_cancel"),
     # Liveness + DB readiness probe (no auth)
-    path('healthz/', healthz, name='healthz'),
-
+    path("healthz/", healthz, name="healthz"),
     # Stream
-    path('stream/', StreamStateUpdateView.as_view(), name='StreamStateUpdateView'),
-    path('streamToken/', StreamTokenView.as_view(), name='StreamTokenView'),
-    path('streamCustom/', StreamCustomView.as_view(), name='StreamCustomView'),
-    path('streamCommon/', StreamCommonView.as_view(), name='StreamCommonView'),
-    path('streamGuard/', StreamGuardrailView.as_view(), name='StreamGuardrailView'),
-    path('streamHumanloop/', StreamHumanLoopView.as_view(), name='StreamHumanLoopView'),
-    path('streamSubagent/', StreamSubAgentsView.as_view(), name='StreamSubAgentsView'),
-
+    path("stream/", StreamStateUpdateView.as_view(), name="StreamStateUpdateView"),
+    path("streamToken/", StreamTokenView.as_view(), name="StreamTokenView"),
+    path("streamCustom/", StreamCustomView.as_view(), name="StreamCustomView"),
+    path("streamCommon/", StreamCommonView.as_view(), name="StreamCommonView"),
+    path("streamGuard/", StreamGuardrailView.as_view(), name="StreamGuardrailView"),
+    path("streamHumanloop/", StreamHumanLoopView.as_view(), name="StreamHumanLoopView"),
+    path("streamSubagent/", StreamSubAgentsView.as_view(), name="StreamSubAgentsView"),
 ]

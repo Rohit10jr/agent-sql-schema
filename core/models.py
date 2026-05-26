@@ -1,12 +1,13 @@
 import json
 import uuid
 
-from django.db import models
-from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
+from django.conf import settings
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
+from django.db import models
 from django.utils import timezone
-from django.conf import settings
+
 
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
@@ -41,9 +42,9 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
 
     date_joined = models.DateTimeField(default=timezone.now)
-    
+
     email_verified = models.BooleanField(default=False)
-    
+
     # user_type = models.CharField(max_length=20, choices=USER_TYPES, default="Job_Seeker")
     # last_login = models.DateTimeField(auto_now=True)
     # is_verified = models.BooleanField(default=False)
@@ -59,7 +60,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     @property
     def full_name(self):
         return f"{self.first_name} {self.last_name}".strip()
-    
+
 
 DEFAULT_PROJECT_NAME = "New Project"
 DEFAULT_DESCRIPTION = "Ai generated SQl and Schema"
@@ -149,6 +150,7 @@ class Result(models.Model):
     def __str__(self):
         return f"{self.type} ({self.id})"
 
+
 class TokenUsage(models.Model):
     """Append-only ledger of LLM token usage. One row per LLM round-trip.
 
@@ -224,7 +226,6 @@ class ConversationMessage(models.Model):
         return f"{self.agent}:{self.thread_id} [{self.role}]"
 
 
-
 # semantic search example
 # from pgvector.django import VectorField
 # from utils.utils import generate_embedding
@@ -250,7 +251,7 @@ class ConversationMessage(models.Model):
 #     job_type = models.CharField(max_length=30, choices=JOB_TYPES)
 #     posted_date = models.DateField(auto_now_add=True)
 #     embedding = VectorField(dimensions=768, blank=True, null=True)
-    
+
 #     def save(self, *args, **kwargs):
 #         """ Override save to generate embeddings before saving. """
 #         content = f"{self.company} {self.title} {self.description} {self.requirements} {self.salary_range} {self.job_type}"
@@ -261,19 +262,18 @@ class ConversationMessage(models.Model):
 #         return f"{self.title} at {self.company.name}"
 
 
-
 # schema model
-import json
 import uuid
 
-from django.db import models
 from django.conf import settings
+from django.db import models
+
 from .llm_models import title_model
 from .prompt import AI_SQL_TITLE_PROMPT
 
-
 DEFAULT_PROJECT_NAME = "New Project"
 DEFAULT_DESCRIPTION = "Ai generated SQl and Schema"
+
 
 class SchemaProject(models.Model):
     """
@@ -317,13 +317,10 @@ class SchemaProject(models.Model):
         """Helper to save a variant into the nested JSON structure"""
         if not self.variants:
             self.variants = {}
-        
-        self.variants[dialect] = {
-            "sql_table": sql_table,
-            "sql_seed_data": sql_seed
-        }
+
+        self.variants[dialect] = {"sql_table": sql_table, "sql_seed_data": sql_seed}
         # Only update the 'variants' column for performance
-        self.save(update_fields=['variants'])
+        self.save(update_fields=["variants"])
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -339,9 +336,7 @@ class SchemaProject(models.Model):
 
                 clean_schema_for_ai = json.dumps(schema_data, indent=2)
 
-                title_prompt = AI_SQL_TITLE_PROMPT.format(
-                    schema=clean_schema_for_ai
-                )
+                title_prompt = AI_SQL_TITLE_PROMPT.format(schema=clean_schema_for_ai)
 
                 result = title_model.invoke(title_prompt)
 

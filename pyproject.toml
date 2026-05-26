@@ -134,3 +134,37 @@ dependencies = [
     "yarl==1.22.0",
     "zstandard==0.25.0",
 ]
+
+# ── Ruff ───────────────────────────────────────────────────────────────────
+# Lint + format, run by pre-commit on every commit. Keep this section small
+# and add rules only when there's a real reason; loud rulesets cause noise.
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    "*/migrations/*",
+    ".venv",
+    "staticfiles",
+    "media",
+    "logs",
+    "samples",
+]
+
+[tool.ruff.lint]
+# Conservative starter set — high signal, low noise.
+#   E/W  pycodestyle (PEP 8 errors + warnings)
+#   F    pyflakes (unused imports / vars, undefined names)
+#   I    isort (import sorting)
+select = ["E", "W", "F", "I"]
+ignore = [
+    "E501",  # line too long — formatter handles this; lint shouldn't double-flag
+]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py: re-exports often look like unused imports — allow them.
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

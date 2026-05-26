@@ -1,0 +1,12 @@
+# Dev-only dependencies. Install with `uv pip install -r requirements-dev.txt`.
+# Render's build only installs requirements.txt, so these never ship to prod.
+
+# ── Git hooks ──────────────────────────────────────────────────────────────
+pre-commit>=3.7
+detect-secrets>=1.5
+
+# ── Tests (added in Phase 2, listed now so one install covers both phases) ─
+pytest>=8.2
+pytest-django>=4.8
+pytest-cov>=5.0
+pytest-mock>=3.14

@@ -62,8 +62,8 @@ from langchain_core.messages import (
 )
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import tool
-from langchain_groq import ChatGroq
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_groq import ChatGroq
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.config import get_store
 from langgraph.graph import START, StateGraph
@@ -77,8 +77,8 @@ from psycopg_pool import ConnectionPool
 logger = logging.getLogger(__name__)
 
 # ── Tunables ────────────────────────────────────────────────────────────────
-MAIN_MODEL = "openai/gpt-oss-120b"      # tool-calling LLM (Groq)
-SUMMARY_MODEL = "openai/gpt-oss-120b"   # cheaper/smaller is fine here
+MAIN_MODEL = "openai/gpt-oss-120b"  # tool-calling LLM (Groq)
+SUMMARY_MODEL = "openai/gpt-oss-120b"  # cheaper/smaller is fine here
 
 # Embedding dimension. MUST equal what the embedding model actually returns AND
 # the width of the pgvector column. gemini-embedding-001 defaults to 3072 dims,
@@ -89,8 +89,8 @@ EMBED_DIMS = 1536
 # Summarization fires when the live message list exceeds this many tokens.
 # Lower it to make summarization easy to trigger while testing.
 MAX_TOKENS_BEFORE_SUMMARY = 2500
-KEEP_RECENT_MESSAGES = 8                # never summarize away the freshest N
-RECALL_LIMIT = 3                        # memories auto-injected per turn
+KEEP_RECENT_MESSAGES = 8  # never summarize away the freshest N
+RECALL_LIMIT = 3  # memories auto-injected per turn
 
 
 # ── Connection pool — ONE pool shared by checkpointer + store ───────────────
@@ -117,7 +117,7 @@ store = PostgresStore(
     index={
         "embed": embeddings,
         "dims": EMBED_DIMS,
-        "fields": ["content"],   # embed the `content` field of each memory
+        "fields": ["content"],  # embed the `content` field of each memory
     },
 )
 
@@ -181,10 +181,10 @@ _SECRET_PATTERNS = (
         r"\b(pass(word|wd)?|secret|api[_-]?key|access[_-]?key|token|bearer|credential)s?\b\s*[:=]",
         re.IGNORECASE,
     ),
-    re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),        # OpenAI-style API keys
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),           # AWS access key id
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), # GitHub tokens
-    re.compile(r"\b[A-Fa-f0-9]{32,}\b"),           # long hex blobs (keys/hashes)
+    re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),  # OpenAI-style API keys
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),  # AWS access key id
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),  # GitHub tokens
+    re.compile(r"\b[A-Fa-f0-9]{32,}\b"),  # long hex blobs (keys/hashes)
 )
 
 
@@ -196,8 +196,8 @@ def _looks_like_secret(text: str) -> bool:
 # ── Graph state ─────────────────────────────────────────────────────────────
 class LTMState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
-    summary: str      # rolling summary of turns compacted out of `messages`
-    recalled: str     # memories the recall node injected this turn
+    summary: str  # rolling summary of turns compacted out of `messages`
+    recalled: str  # memories the recall node injected this turn
 
 
 # ════════════════════════════════════════════════════════════════════════════

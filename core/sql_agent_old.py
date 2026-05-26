@@ -10,25 +10,25 @@ from uuid import uuid4
 # ── Django / DRF ───────────────────────────────────────────────────
 from django.conf import settings
 from django.http import StreamingHttpResponse
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
+from langchain.tools import ToolRuntime
 
 # ── LangChain / LangGraph ──────────────────────────────────────────
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from langchain_core.tools import InjectedToolArg, tool
-from langchain.tools import ToolRuntime
 from langgraph.runtime import Runtime
 
 # ── Other third-party ──────────────────────────────────────────────
 from psycopg_pool import ConnectionPool
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from sqlalchemy import text
 from typing_extensions import TypedDict
 
@@ -45,6 +45,7 @@ GROQ_API_KEY = settings.GROQ_API_KEY
 
 
 # ── State & Context ────────────────────────────────────────────────
+
 
 class SQLAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
@@ -66,6 +67,7 @@ class UserContext:
 
 # ── Chart helpers ──────────────────────────────────────────────────
 
+
 class ChartType(StrEnum):
     bar = "bar"
     doughnut = "doughnut"
@@ -86,9 +88,12 @@ def _build_chart_config(chart_type: ChartType, title: str) -> dict:
     }
     if chart_type == ChartType.bar:
         base["data"]["datasets"][0]["backgroundColor"] = [
-            "rgba(255, 99, 132, 0.5)", "rgba(255, 159, 64, 0.5)",
-            "rgba(255, 205, 86, 0.5)", "rgba(75, 192, 192, 0.5)",
-            "rgba(54, 162, 235, 0.5)", "rgba(153, 102, 255, 0.5)",
+            "rgba(255, 99, 132, 0.5)",
+            "rgba(255, 159, 64, 0.5)",
+            "rgba(255, 205, 86, 0.5)",
+            "rgba(75, 192, 192, 0.5)",
+            "rgba(54, 162, 235, 0.5)",
+            "rgba(153, 102, 255, 0.5)",
             "rgba(201, 203, 207, 0.5)",
         ]
     elif chart_type == ChartType.line:
@@ -96,8 +101,10 @@ def _build_chart_config(chart_type: ChartType, title: str) -> dict:
         base["data"]["datasets"][0]["tension"] = 0.1
     elif chart_type == ChartType.doughnut:
         base["data"]["datasets"][0]["backgroundColor"] = [
-            "rgb(255, 99, 132)", "rgb(54, 162, 235)",
-            "rgb(255, 205, 86)", "rgb(75, 192, 192)",
+            "rgb(255, 99, 132)",
+            "rgb(54, 162, 235)",
+            "rgb(255, 205, 86)",
+            "rgb(75, 192, 192)",
             "rgb(153, 102, 255)",
         ]
         base["data"]["datasets"][0]["hoverOffset"] = 4
@@ -123,8 +130,17 @@ def fill_chart_with_data(chart_json: str, columns: list, rows: list, chart_type:
 # ── SQL helpers ────────────────────────────────────────────────────
 
 FORBIDDEN_KEYWORDS = {
-    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
-    "CREATE", "REPLACE", "MERGE", "GRANT", "REVOKE",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "TRUNCATE",
+    "CREATE",
+    "REPLACE",
+    "MERGE",
+    "GRANT",
+    "REVOKE",
 }
 
 
@@ -160,7 +176,12 @@ def execute_sql_query(
 
     truncated_rows = [[truncate_value(cell) for cell in row] for row in rows]
 
-    if for_chart and chart_type in (ChartType.bar, ChartType.line, ChartType.doughnut, ChartType.scatter):
+    if for_chart and chart_type in (
+        ChartType.bar,
+        ChartType.line,
+        ChartType.doughnut,
+        ChartType.scatter,
+    ):
         if not truncated_rows:
             raise ValueError("No data returned from the query.")
         if len(truncated_rows[0]) != 2:
@@ -182,14 +203,14 @@ def execute_sql_query(
 
 @tool
 def list_tables(runtime: ToolRuntime[UserContext]) -> str:
-# def list_tables(runtime: InjectedRuntime) -> str:
+    # def list_tables(runtime: InjectedRuntime) -> str:
     """List all available tables in the database. Call this first to see what tables exist."""
     return ", ".join(runtime.context.db.get_usable_table_names())
 
 
 @tool
 def get_table_schema(table_names: str, runtime: ToolRuntime[UserContext]) -> str:
-# def get_table_schema(table_names: str, runtime: InjectedRuntime) -> str:
+    # def get_table_schema(table_names: str, runtime: InjectedRuntime) -> str:
     """Get the schema and sample rows for the specified tables.
     Input is a comma-separated list of table names.
     Example: 'customers, orders, products'
@@ -347,38 +368,66 @@ tools = [list_tables, get_table_schema, run_sql_query, generate_chart]
 # )
 
 HATE_PATTERNS = (
-    "nigger", "nigga",
+    "nigger",
+    "nigga",
     "faggot",
     "tranny",
-    "retard", "retarded",
+    "retard",
+    "retarded",
     "kike",
-    "chink", "ching chong",
+    "chink",
+    "ching chong",
     "spic",
     "gook",
     "wetback",
-    "towelhead", "raghead",
+    "towelhead",
+    "raghead",
     "gypped",
 )
 
 SEXUAL_PATTERNS = (
-    "blowjob", "handjob", "rimjob", "footjob",
-    "cunnilingus", "fellatio",
-    "cumshot", "jizz",
-    "masturbate", "masturbation",
-    "jack off", "jerk off",
-    "pornhub", "xvideos", "xnxx", "redtube", "onlyfans",
-    "suck my", "fuck me", "want to fuck you",
+    "blowjob",
+    "handjob",
+    "rimjob",
+    "footjob",
+    "cunnilingus",
+    "fellatio",
+    "cumshot",
+    "jizz",
+    "masturbate",
+    "masturbation",
+    "jack off",
+    "jerk off",
+    "pornhub",
+    "xvideos",
+    "xnxx",
+    "redtube",
+    "onlyfans",
+    "suck my",
+    "fuck me",
+    "want to fuck you",
 )
 
 INJECTION_PATTERNS = (
-    "ignore previous instructions", "ignore all previous", "ignore the above",
-    "forget previous instructions", "forget your instructions",
-    "forget all instructions", "forget what i told you",
-    "system prompt", "your prompt",
-    "you are now", "pretend you are", "pretend to be",
-    "act as if", "act as a",
-    "developer mode", "jailbreak", "dan mode",
-    "override your", "bypass your",
+    "ignore previous instructions",
+    "ignore all previous",
+    "ignore the above",
+    "forget previous instructions",
+    "forget your instructions",
+    "forget all instructions",
+    "forget what i told you",
+    "system prompt",
+    "your prompt",
+    "you are now",
+    "pretend you are",
+    "pretend to be",
+    "act as if",
+    "act as a",
+    "developer mode",
+    "jailbreak",
+    "dan mode",
+    "override your",
+    "bypass your",
 )
 
 # REFUSAL_THREAT = (
@@ -409,8 +458,8 @@ def _compile_patterns(patterns: tuple[str, ...]) -> re.Pattern:
 # then hate, sexual, injection.
 GUARDRAILS: tuple[tuple[str, re.Pattern, str], ...] = (
     # ("threat",    _compile_patterns(THREAT_PATTERNS),    REFUSAL_THREAT),
-    ("hate",      _compile_patterns(HATE_PATTERNS),      REFUSAL_HATE),
-    ("sexual",    _compile_patterns(SEXUAL_PATTERNS),    REFUSAL_SEXUAL),
+    ("hate", _compile_patterns(HATE_PATTERNS), REFUSAL_HATE),
+    ("sexual", _compile_patterns(SEXUAL_PATTERNS), REFUSAL_SEXUAL),
     ("injection", _compile_patterns(INJECTION_PATTERNS), REFUSAL_INJECTION),
 )
 
@@ -430,6 +479,7 @@ def _guardrail_refusal(messages: list[BaseMessage]) -> Optional[str]:
             logger.info("Guardrail tripped: category=%s match=%r", category, match.group(0))
             return refusal
     return None
+
 
 LLMS_WITH_TOOLS: dict[str, Any] = {
     name: _build_llm(name).bind_tools(tools) for name in SUPPORTED_MODELS
@@ -484,6 +534,7 @@ sql_agent = sql_graph.compile(checkpointer=_checkpointer)
 
 # ── SSE helpers ────────────────────────────────────────────────────
 
+
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
@@ -520,7 +571,9 @@ def _extract_token_content(token: Any) -> tuple[str, str]:
         return "text", str(token.content or "")
     return "text", ""
 
+
 # ── View ───────────────────────────────────────────────────────────
+
 
 class SqlAgent(APIView):
     permission_classes = [IsAuthenticated]
@@ -544,7 +597,9 @@ class SqlAgent(APIView):
             try:
                 chat = ChatSession.objects.get(thread_id=thread_id, user=request.user)
             except ChatSession.DoesNotExist:
-                return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response(
+                    {"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND
+                )
             if not chat.connection:
                 return Response(
                     {"error": "This conversation has no database connection"},
@@ -553,7 +608,9 @@ class SqlAgent(APIView):
             connection = chat.connection
         else:
             if not connection_id:
-                return Response({"error": "connection_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "connection_id is required"}, status=status.HTTP_400_BAD_REQUEST
+                )
             try:
                 connection = Connection.objects.get(id=connection_id, user=request.user)
             except Connection.DoesNotExist:
@@ -573,7 +630,9 @@ class SqlAgent(APIView):
         try:
             db = ConnectionService.get_sql_database(connection)
         except Exception as e:
-            return Response({"error": f"Failed to connect: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": f"Failed to connect: {e}"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         context = UserContext(
             user_id=user_id,
@@ -584,16 +643,22 @@ class SqlAgent(APIView):
         )
 
         def stream_generator():
-            last_run_result_id: Optional[Any] = None  # link CHART_GENERATION_RESULT -> SQL_QUERY_RUN_RESULT
-            produced_response = False  # any AIMessage content this turn? gates ChatSession cleanup on failure
+            last_run_result_id: Optional[Any] = (
+                None  # link CHART_GENERATION_RESULT -> SQL_QUERY_RUN_RESULT
+            )
+            produced_response = (
+                False  # any AIMessage content this turn? gates ChatSession cleanup on failure
+            )
 
             try:
                 if new_thread:
-                    yield _sse({
-                        "type": "thread_created",
-                        "thread_id": thread_id,
-                        "connection_id": str(connection.id),
-                    })
+                    yield _sse(
+                        {
+                            "type": "thread_created",
+                            "thread_id": thread_id,
+                            "connection_id": str(connection.id),
+                        }
+                    )
 
                 for mode, data in sql_agent.stream(
                     {"messages": [HumanMessage(content=query)]},
@@ -607,12 +672,14 @@ class SqlAgent(APIView):
                         token, metadata = data
                         kind, content = _extract_token_content(token)
                         if content:
-                            yield _sse({
-                                "type": "token",
-                                "kind": kind,                              # 'reasoning' | 'text'
-                                "node": metadata.get("langgraph_node", "unknown"),
-                                "text": content,
-                            })
+                            yield _sse(
+                                {
+                                    "type": "token",
+                                    "kind": kind,  # 'reasoning' | 'text'
+                                    "node": metadata.get("langgraph_node", "unknown"),
+                                    "text": content,
+                                }
+                            )
                     # ─── 2. UPDATES MODE — node completions ─────────────────
                     elif mode == "updates":
                         for node_name, state_update in data.items():
@@ -644,11 +711,13 @@ class SqlAgent(APIView):
                                         tc_name = tc["name"]
                                         tc_args = tc.get("args", {})
 
-                                        yield _sse({
-                                            "type": "tool_start",
-                                            "name": tc_name,
-                                            "args": _safe_serialize(tc_args),
-                                        })
+                                        yield _sse(
+                                            {
+                                                "type": "tool_start",
+                                                "name": tc_name,
+                                                "args": _safe_serialize(tc_args),
+                                            }
+                                        )
 
                                         if tc_name == "run_sql_query":
                                             sql = tc_args.get("query", "")
@@ -656,20 +725,28 @@ class SqlAgent(APIView):
                                                 rec = Result.objects.create(
                                                     thread_id=thread_id,
                                                     type=Result.ResultType.SQL_QUERY_STRING,
-                                                    content=json.dumps({
-                                                        "sql": sql,
-                                                        "for_chart": tc_args.get("for_chart", False),
-                                                    }),
+                                                    content=json.dumps(
+                                                        {
+                                                            "sql": sql,
+                                                            "for_chart": tc_args.get(
+                                                                "for_chart", False
+                                                            ),
+                                                        }
+                                                    ),
                                                 )
-                                                yield _sse({
-                                                    "type": "result",
-                                                    "result_type": Result.ResultType.SQL_QUERY_STRING,
-                                                    "result_id": str(rec.id),
-                                                    "content": {
-                                                        "sql": sql,
-                                                        "for_chart": tc_args.get("for_chart", False),
-                                                    },
-                                                })
+                                                yield _sse(
+                                                    {
+                                                        "type": "result",
+                                                        "result_type": Result.ResultType.SQL_QUERY_STRING,
+                                                        "result_id": str(rec.id),
+                                                        "content": {
+                                                            "sql": sql,
+                                                            "for_chart": tc_args.get(
+                                                                "for_chart", False
+                                                            ),
+                                                        },
+                                                    }
+                                                )
 
                             elif node_name == "tools":
                                 # Tool node finished: surface tool results + persist run/chart results
@@ -681,12 +758,16 @@ class SqlAgent(APIView):
 
                                     # Charts ship a full Chart.js JSON in `content` and are
                                     # rendered by the frontend — never truncate those.
-                                    sse_content = content if name == "generate_chart" else content[:500]
-                                    yield _sse({
-                                        "type": "tool_result",
-                                        "name": name,
-                                        "content": sse_content,
-                                    })
+                                    sse_content = (
+                                        content if name == "generate_chart" else content[:500]
+                                    )
+                                    yield _sse(
+                                        {
+                                            "type": "tool_result",
+                                            "name": name,
+                                            "content": sse_content,
+                                        }
+                                    )
 
                                     if name == "run_sql_query" and not content.startswith("ERROR"):
                                         rec = Result.objects.create(
@@ -695,12 +776,14 @@ class SqlAgent(APIView):
                                             content=json.dumps({"raw": content}),
                                         )
                                         last_run_result_id = rec.id
-                                        yield _sse({
-                                            "type": "result",
-                                            "result_type": Result.ResultType.SQL_QUERY_RUN_RESULT,
-                                            "result_id": str(rec.id),
-                                            "content": {"raw": content},
-                                        })
+                                        yield _sse(
+                                            {
+                                                "type": "result",
+                                                "result_type": Result.ResultType.SQL_QUERY_RUN_RESULT,
+                                                "result_id": str(rec.id),
+                                                "content": {"raw": content},
+                                            }
+                                        )
 
                                     elif name == "generate_chart" and "CHART_JSON:" in content:
                                         chart_json = content.split("CHART_JSON:", 1)[1]
@@ -710,12 +793,14 @@ class SqlAgent(APIView):
                                             content=json.dumps({"chartjs_json": chart_json}),
                                             linked_id=last_run_result_id,
                                         )
-                                        yield _sse({
-                                            "type": "result",
-                                            "result_type": Result.ResultType.CHART_GENERATION_RESULT,
-                                            "result_id": str(rec.id),
-                                            "content": {"chartjs_json": chart_json},
-                                        })
+                                        yield _sse(
+                                            {
+                                                "type": "result",
+                                                "result_type": Result.ResultType.CHART_GENERATION_RESULT,
+                                                "result_id": str(rec.id),
+                                                "content": {"chartjs_json": chart_json},
+                                            }
+                                        )
 
                 # ─── 3. FINAL — done event + title for new threads ─────────
                 final_state = sql_agent.get_state(config)
@@ -739,11 +824,10 @@ class SqlAgent(APIView):
                 if produced_response:
                     try:
                         from core.services.search_index import reindex_thread
+
                         reindex_thread(request.user, "sql", thread_id, final_messages)
                     except Exception:
-                        logger.exception(
-                            "Failed to index SQL thread %s for search", thread_id
-                        )
+                        logger.exception("Failed to index SQL thread %s for search", thread_id)
 
             except Exception as e:
                 logger.exception("SQL agent stream failed")
@@ -764,9 +848,7 @@ class SqlAgent(APIView):
                                 thread_id,
                             )
                     except Exception:
-                        logger.exception(
-                            "Failed to clean up empty ChatSession %s", thread_id
-                        )
+                        logger.exception("Failed to clean up empty ChatSession %s", thread_id)
 
         response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"

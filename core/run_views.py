@@ -41,7 +41,10 @@ class RunCancelView(APIView):
         run_registry.cancel(run_id)
         logger.info(
             "Cancel requested for run %s (user=%s agent=%s thread=%s)",
-            run_id, handle.user_id, handle.agent, handle.thread_id,
+            run_id,
+            handle.user_id,
+            handle.agent,
+            handle.thread_id,
         )
         return Response(
             {"status": "cancelling", "run_id": run_id},

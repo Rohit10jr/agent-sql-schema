@@ -132,6 +132,7 @@ def setup_ltm_schema() -> None:
 # Runtime context and graph state
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Context:
     user_id: str
@@ -154,6 +155,7 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 # Structured artifact models
 # ---------------------------------------------------------------------------
+
 
 class Column(BaseModel):
     name: str = Field(description="snake_case column name")
@@ -318,14 +320,15 @@ def validate_schema_payload(schema: dict[str, Any]) -> list[str]:
                 issues.append(f"Foreign key {name}.{col} references missing table {ref_table}.")
             elif ref_col not in table_columns[ref_table]:
                 issues.append(
-                    f"Foreign key {name}.{col} references missing column "
-                    f"{ref_table}.{ref_col}."
+                    f"Foreign key {name}.{col} references missing column " f"{ref_table}.{ref_col}."
                 )
 
         for index in table.get("indexes") or []:
             for col in index.get("columns") or []:
                 if col not in table_columns.get(name, set()):
-                    issues.append(f"Index {index.get('name')} references missing column {name}.{col}.")
+                    issues.append(
+                        f"Index {index.get('name')} references missing column {name}.{col}."
+                    )
 
     return issues
 
@@ -388,6 +391,7 @@ def validate_sql_payload(
 # ---------------------------------------------------------------------------
 # Memory tools
 # ---------------------------------------------------------------------------
+
 
 @tool
 def create_memory(content: str, category: str = "general") -> str:
@@ -494,10 +498,7 @@ def generate_schema(
 ) -> str:
     """Generate or refine a validated schema JSON artifact from requirements."""
     dialect = _normalize_dialect(dialect)
-    prompt = (
-        f"Dialect: {dialect}\n"
-        f"Requirements:\n{requirements.strip()}\n\n"
-    )
+    prompt = f"Dialect: {dialect}\n" f"Requirements:\n{requirements.strip()}\n\n"
     if existing_schema_json.strip():
         prompt += f"Existing schema to refine:\n{existing_schema_json.strip()}\n"
 
@@ -717,6 +718,7 @@ ltm_schema_agent = builder.compile(checkpointer=checkpointer, store=store)
 # ---------------------------------------------------------------------------
 # Test helpers / artifact extraction
 # ---------------------------------------------------------------------------
+
 
 def chat(
     message: str,

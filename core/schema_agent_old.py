@@ -1,27 +1,20 @@
 import json
 import logging
 import operator
-import os
-import uuid
-from typing import Any, List, Literal
+from typing import List, Literal
 from uuid import uuid4
 
 from django.conf import settings
-from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt, csrf_protect, ensure_csrf_cookie
-from dotenv import load_dotenv
-from groq import BadRequestError
-from langchain.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
-from langchain_core.exceptions import OutputParserException
+from django.http import HttpResponse, StreamingHttpResponse
+from langchain.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import RetryPolicy
 from psycopg_pool import ConnectionPool
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from typing_extensions import Annotated, TypedDict
@@ -33,12 +26,13 @@ from .prompt import (
     TEST_SQL_GENERATION_SYSTEM_PROMPT,
     TEST_TABLE_SCHEMA_SYSTEM_PROMPT,
 )
-from .tasks import persist_schema_project, save_schema_project
+from .tasks import persist_schema_project
 from .utils import generate_chat_title
 
 logger = logging.getLogger(__name__)
 
 api_key = settings.GROQ_API_KEY
+
 
 # State Definition
 class SqlState(TypedDict):
@@ -53,9 +47,11 @@ class SqlState(TypedDict):
     sql_seed_data: str
     # final_json: str
 
+
 # Structured Output Models
 class RouterDecision(BaseModel):
     """Decision for routing to next node with system architecture understanding."""
+
     valid_intent: bool = Field(
         description="True if the user wants to create / update / build / analyze / learn about any product, app, website, or database system."
     )
@@ -74,30 +70,46 @@ class RouterDecision(BaseModel):
         )
     )
 
+
 class TableColumn(BaseModel):
     """Column definition for a table."""
+
     name: str = Field(description="Column name")
     type: str = Field(description="Column data type")
-    constraints: str = Field(description="Column constraints (e.g., PRIMARY KEY, NOT NULL)", default="")
+    constraints: str = Field(
+        description="Column constraints (e.g., PRIMARY KEY, NOT NULL)", default=""
+    )
+
 
 class Table(BaseModel):
     """Table schema definition."""
+
     name: str = Field(description="Table name")
     columns: List[TableColumn] = Field(description="List of columns in the table")
 
+
 class DatabaseSchema(BaseModel):
     """DataBase Table Schema."""
+
     tables: List[Table]
-    answer: str = Field(description="A brief explanation of the present schema design and changes made.")
+    answer: str = Field(
+        description="A brief explanation of the present schema design and changes made."
+    )
+
 
 class SQLGeneration(BaseModel):
     """Generate SQL for table and seed data."""
+
     sql: str = Field(description="Complete CREATE TABLE statements for all tables")
     seed_data: str = Field(description="INSERT statements with sample data for all tables")
-    answer: str = Field(description="A brief explanation of the present schema design and changes made.")
+    answer: str = Field(
+        description="A brief explanation of the present schema design and changes made."
+    )
+
 
 class FinalMessage(BaseModel):
     message: str = Field(description="your reply to user prompt")
+
 
 # ── Models ─────────────────────────────────────────────────────────
 # Models the schema agent exposes. Mirrors sql_agent.SUPPORTED_MODELS so the
@@ -134,9 +146,7 @@ def _build_model_bundle(model_name: str) -> dict:
     }
 
 
-SCHEMA_LLMS: dict[str, dict] = {
-    name: _build_model_bundle(name) for name in SUPPORTED_MODELS
-}
+SCHEMA_LLMS: dict[str, dict] = {name: _build_model_bundle(name) for name in SUPPORTED_MODELS}
 
 
 def _models_for(state: SqlState) -> dict:
@@ -149,21 +159,23 @@ def _models_for(state: SqlState) -> dict:
 # Router Node
 # ============
 
-def descision_node(state: SqlState):
 
+def descision_node(state: SqlState):
     structured_router_model = _models_for(state)["router"]
     user_prompt = state["prompt"]
     all_messages = state.get("messages", [])
     # recent_history = all_messages[-10:] if all_messages else []
-    
+
     # input_messages = [{"role": "system", "content": TEST_DECISION_SYSTEM_PROMPT}]
     # input_messages.extend(recent_history)
     # input_messages.append({"role": "user", "content": user_prompt})
 
     # result = structured_router_model.invoke(input_messages)
     result = structured_router_model.invoke(
-        [{"role": "system", "content": TEST_DECISION_SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt}]
+        [
+            {"role": "system", "content": TEST_DECISION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
     )
 
     new_messages = [HumanMessage(content=user_prompt), AIMessage(content=result.answer)]
@@ -179,9 +191,12 @@ def descision_node(state: SqlState):
         # "answer": result.answer,
     }
 
-def route_decision(state: SqlState) -> Literal["create_table_schema", "generate_sql_node", "message_node"]:
+
+def route_decision(
+    state: SqlState,
+) -> Literal["create_table_schema", "generate_sql_node", "message_node"]:
     """Decides whether to create schema, generate SQL, or end."""
-    
+
     print("--- Route Decision ---")
 
     if not state["valid_intent"]:
@@ -190,9 +205,11 @@ def route_decision(state: SqlState) -> Literal["create_table_schema", "generate_
         return "create_table_schema"
     return "message_node"
 
+
 # =============
 # Schema Nodes
 # =============
+
 
 def create_table_schema(state: SqlState):
     """
@@ -203,7 +220,7 @@ def create_table_schema(state: SqlState):
     generate = state.get("generate")
     previous_schema = state.get("schema_table", "")
     all_messages = state.get("messages", [])
-    recent_history = all_messages[-15:] if all_messages else []    
+    recent_history = all_messages[-15:] if all_messages else []
 
     instruction = f"""
         Generate a database table schema for User Requirement: {prompt}
@@ -212,7 +229,7 @@ def create_table_schema(state: SqlState):
         instruction += f"""
         You previously generated the following table schema:
         {previous_schema} """
-        
+
     result = structured_schema_model.invoke(
         [
             {"role": "system", "content": TEST_TABLE_SCHEMA_SYSTEM_PROMPT},
@@ -224,20 +241,22 @@ def create_table_schema(state: SqlState):
     print("--- Create Table Schema ---")
     ai_message = [AIMessage(content=result.answer)]
     tables_data = [table.model_dump() for table in result.tables]
-    tables_dump_data = result.model_dump_json(exclude={"answer"}),
+    tables_dump_data = (result.model_dump_json(exclude={"answer"}),)
 
     # print("tables_data", tables_data)
     # print("tables_dump_data", tables_dump_data)
 
     return {
         "messages": ai_message,
-        "schema_table": json.dumps({"tables": tables_data})
+        "schema_table": json.dumps({"tables": tables_data}),
         # "schema_table": tables_dump_data,
     }
-        
+
+
 # ===========
 # Sql Nodes
 # ===========
+
 
 def generate_sql_node(state: SqlState):
     """
@@ -253,8 +272,8 @@ def generate_sql_node(state: SqlState):
     instruction = f"""
         Generate appropriate SQL and seed data for this user prompt {prompt}.
         """
-    
-    if generate and schema_table: 
+
+    if generate and schema_table:
         instruction += f"""
         Existing Schema: {schema_table}
         """
@@ -269,7 +288,7 @@ def generate_sql_node(state: SqlState):
     # full_prompt = SQL_GENERATION_SYSTEM_PROMPT + "\n" + instruction
     # result = structured_sql_model.invoke(full_prompt)
     result = structured_sql_model.invoke(
-            [
+        [
             {"role": "system", "content": TEST_SQL_GENERATION_SYSTEM_PROMPT},
             {"role": "user", "content": instruction},
         ]
@@ -284,14 +303,15 @@ def generate_sql_node(state: SqlState):
         "sql_seed_data": result.seed_data,
     }
 
+
 # ===============
 # Message Nodes
 # ===============
 
 # sql_reply = schema_model.with_structured_output(FinalMessage)
 
-def message_node(state: SqlState):
 
+def message_node(state: SqlState):
     plain_model = _models_for(state)["plain"]
     user_prompt = state["prompt"]
     explain = state.get("explain", False)
@@ -302,7 +322,7 @@ def message_node(state: SqlState):
     sql_seed_data = state.get("sql_seed_data")
 
     all_messages = state.get("messages", [])
-    recent_history = all_messages[-15:] if all_messages else []    
+    recent_history = all_messages[-15:] if all_messages else []
 
     # Base system instruction
     # system_content = MESSAGE_SYSTEM_PROMPT
@@ -352,46 +372,47 @@ def message_node(state: SqlState):
 # 5. Graph Construction
 schema_graph = StateGraph(SqlState)
 schema_graph.add_node("descision_node", descision_node)
-schema_graph.add_node("create_table_schema", create_table_schema,
+schema_graph.add_node(
+    "create_table_schema",
+    create_table_schema,
     retry_policy=RetryPolicy(
-            max_attempts=2,
-            initial_interval=1.0,
-            backoff_factor=2.0,
-            max_interval= 30,
-            retry_on=Exception
-        )
-    )
-schema_graph.add_node("generate_sql_node", generate_sql_node,
+        max_attempts=2,
+        initial_interval=1.0,
+        backoff_factor=2.0,
+        max_interval=30,
+        retry_on=Exception,
+    ),
+)
+schema_graph.add_node(
+    "generate_sql_node",
+    generate_sql_node,
     retry_policy=RetryPolicy(
-            max_attempts=2,
-            initial_interval=1.0,
-            backoff_factor=2.0,
-            max_interval= 30,
-            retry_on=Exception
-        )
-    )
+        max_attempts=2,
+        initial_interval=1.0,
+        backoff_factor=2.0,
+        max_interval=30,
+        retry_on=Exception,
+    ),
+)
 schema_graph.add_node("message_node", message_node)
 
 schema_graph.add_edge(START, "descision_node")
 schema_graph.add_conditional_edges(
     "descision_node",
     route_decision,
-    {
-        END: END,
-        "create_table_schema": "create_table_schema",
-        "message_node": "message_node"
-    }
+    {END: END, "create_table_schema": "create_table_schema", "message_node": "message_node"},
 )
 schema_graph.add_edge("create_table_schema", "generate_sql_node")
 schema_graph.add_edge("generate_sql_node", "message_node")
 schema_graph.add_edge("message_node", END)
 
-DB_URI= settings.DB_URI
+DB_URI = settings.DB_URI
 
 pool = ConnectionPool(DB_URI)
 pg_checkpointer = PostgresSaver(pool)
 
 schema_agent = schema_graph.compile(checkpointer=pg_checkpointer)
+
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, default=str)}\n\n"
@@ -458,10 +479,12 @@ class SchemaAgent(APIView):
 
             try:
                 if new_project:
-                    yield _sse({
-                        "type": "thread_created",
-                        "slug": thread_id,
-                    })
+                    yield _sse(
+                        {
+                            "type": "thread_created",
+                            "slug": thread_id,
+                        }
+                    )
 
                 for mode, data in schema_agent.stream(
                     {"prompt": query, "model": model},
@@ -480,23 +503,27 @@ class SchemaAgent(APIView):
                         if content:
                             text = str(content)
                             final_text += text
-                            yield _sse({
-                                "type": "token",
-                                "kind": "text",
-                                "node": node,
-                                "text": text,
-                            })
+                            yield _sse(
+                                {
+                                    "type": "token",
+                                    "kind": "text",
+                                    "node": node,
+                                    "text": text,
+                                }
+                            )
 
                     # ─── 2. UPDATES MODE — node-level progress + structured results ──
                     elif mode == "updates":
                         for node_name, state_update in data.items():
                             if node_name not in emitted_nodes:
                                 emitted_nodes.add(node_name)
-                                yield _sse({
-                                    "type": "node_start",
-                                    "node": node_name,
-                                    "label": _NODE_LABELS.get(node_name, node_name),
-                                })
+                                yield _sse(
+                                    {
+                                        "type": "node_start",
+                                        "node": node_name,
+                                        "label": _NODE_LABELS.get(node_name, node_name),
+                                    }
+                                )
 
                             if not isinstance(state_update, dict):
                                 continue
@@ -504,24 +531,28 @@ class SchemaAgent(APIView):
                             # Schema generation → ship the structured tables JSON.
                             schema_table = state_update.get("schema_table")
                             if schema_table:
-                                yield _sse({
-                                    "type": "result",
-                                    "result_type": "SCHEMA",
-                                    "content": {"schema_table": schema_table},
-                                })
+                                yield _sse(
+                                    {
+                                        "type": "result",
+                                        "result_type": "SCHEMA",
+                                        "content": {"schema_table": schema_table},
+                                    }
+                                )
 
                             # SQL generation → ship CREATE + INSERT strings.
                             sql_table = state_update.get("sql_table")
                             sql_seed = state_update.get("sql_seed_data")
                             if sql_table or sql_seed:
-                                yield _sse({
-                                    "type": "result",
-                                    "result_type": "SQL",
-                                    "content": {
-                                        "sql_table": sql_table or "",
-                                        "sql_seed_data": sql_seed or "",
-                                    },
-                                })
+                                yield _sse(
+                                    {
+                                        "type": "result",
+                                        "result_type": "SQL",
+                                        "content": {
+                                            "sql_table": sql_table or "",
+                                            "sql_seed_data": sql_seed or "",
+                                        },
+                                    }
+                                )
 
                 # ─── 3. FINAL — pull canonical state, persist, emit done + title ──
                 final_state = schema_agent.get_state(config)
@@ -543,20 +574,24 @@ class SchemaAgent(APIView):
                 # path — the mid-stream `updates` parsing is best-effort and will be
                 # tightened later.
                 if schema_json:
-                    yield _sse({
-                        "type": "result",
-                        "result_type": "SCHEMA",
-                        "content": {"schema_table": schema_json},
-                    })
+                    yield _sse(
+                        {
+                            "type": "result",
+                            "result_type": "SCHEMA",
+                            "content": {"schema_table": schema_json},
+                        }
+                    )
                 if sql_table_json or sql_seed_json:
-                    yield _sse({
-                        "type": "result",
-                        "result_type": "SQL",
-                        "content": {
-                            "sql_table": sql_table_json or "",
-                            "sql_seed_data": sql_seed_json or "",
-                        },
-                    })
+                    yield _sse(
+                        {
+                            "type": "result",
+                            "result_type": "SQL",
+                            "content": {
+                                "sql_table": sql_table_json or "",
+                                "sql_seed_data": sql_seed_json or "",
+                            },
+                        }
+                    )
 
                 if final_text:
                     produced_response = True
@@ -590,11 +625,10 @@ class SchemaAgent(APIView):
                 if produced_response:
                     try:
                         from core.services.search_index import reindex_thread
+
                         reindex_thread(request.user, "schema", thread_id, messages)
                     except Exception:
-                        logger.exception(
-                            "Failed to index schema thread %s for search", thread_id
-                        )
+                        logger.exception("Failed to index schema thread %s for search", thread_id)
 
             except Exception as e:
                 logger.exception("Schema-agent stream failed")
@@ -604,18 +638,14 @@ class SchemaAgent(APIView):
                 # Clean up empty new projects (parallels the SQL-agent cleanup).
                 if new_project and not produced_response:
                     try:
-                        SchemaProject.objects.filter(
-                            slug=thread_id, user=request.user
-                        ).delete()
+                        SchemaProject.objects.filter(slug=thread_id, user=request.user).delete()
                         pg_checkpointer.delete_thread(thread_id)
                         logger.info(
                             "Deleted empty SchemaProject %s after failed first turn",
                             thread_id,
                         )
                     except Exception:
-                        logger.exception(
-                            "Failed to clean up empty SchemaProject %s", thread_id
-                        )
+                        logger.exception("Failed to clean up empty SchemaProject %s", thread_id)
 
         response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"

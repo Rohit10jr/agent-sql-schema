@@ -43,7 +43,7 @@ EMBED_DIMS = 1536
 # this cosine similarity against it.
 DEDUP_SIMILARITY_THRESHOLD = 0.90
 
-RECALL_LIMIT = 3   # memories injected into the agent prompt per turn
+RECALL_LIMIT = 3  # memories injected into the agent prompt per turn
 
 
 # ── Infrastructure (module-level singletons) ────────────────────────────────

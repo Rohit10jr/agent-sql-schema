@@ -1,7 +1,7 @@
 """Shared utilities for the core app."""
 
-import os
 import logging
+import os
 
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
@@ -13,8 +13,10 @@ logger = logging.getLogger(__name__)
 
 # ── Title Generation ────────────────────────────────────────────────
 
+
 class ChatTitleSchema(BaseModel):
     """Structured output schema for chat title generation."""
+
     title: str = Field(description="A short, descriptive title for the conversation")
 
 
@@ -54,7 +56,6 @@ def generate_chat_title(messages_text: str) -> str:
         A short title string.
     """
     try:
-
         # [??] why call _get_title_model() and not define it outside and call title_model directly in this function?
         title_model = _get_title_model()
         response = title_model.invoke(
@@ -81,16 +82,14 @@ def generate_and_save_title(thread_id: str, messages_text: str) -> str:
     return title
 
 
+# embedding semantic
 
-
-# embedding semantic 
-
-# import google.generativeai as genai 
-# from django.db import models 
+# import google.generativeai as genai
+# from django.db import models
 # from django.core.exceptions import ValidationError
 # from dotenv import load_dotenv
-# import environ 
-# import os 
+# import environ
+# import os
 
 # # env = environ.Env()
 # # environ.Env.read_env()
@@ -111,7 +110,6 @@ def generate_and_save_title(thread_id: str, messages_text: str) -> str:
 #         return result['embedding']
 #     except Exception as e:
 #         raise ValidationError(f"Failed to generate Embedding: {e}")
-
 
 
 # # semantic search based on user prompts/query
@@ -154,16 +152,16 @@ def generate_and_save_title(thread_id: str, messages_text: str) -> str:
 
 #         # Perform semantic search
 #         # similar_jobs = JobPost.objects.annotate(distance=CosineDistance(F("embedding"), query_embedding)).order_by("distance")[:3]
-#         similar_jobs = JobPost.objects.annotate(distance=CosineDistance("embedding", query_embedding)).order_by("distance")[:3] 
+#         similar_jobs = JobPost.objects.annotate(distance=CosineDistance("embedding", query_embedding)).order_by("distance")[:3]
 #         serializer = self.get_serializer_class()(similar_jobs, many=True)
 #         return Response(serializer.data)
 
 
 # # Define weights
 # WEIGHTS = {
-#     "work_experience": 0.5,  
-#     "education": 0.2,        
-#     "skills": 0.3,           
+#     "work_experience": 0.5,
+#     "education": 0.2,
+#     "skills": 0.3,
 #     "personal_info": 0.05    # Reduced impact for location-based match
 # }
 

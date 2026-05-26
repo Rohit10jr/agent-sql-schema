@@ -1,81 +1,63 @@
-import os
 import json
-from uuid import uuid4
 from typing import TypedDict
-from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import InMemorySaver
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.db import transaction
-from django.http import HttpResponse
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from typing import Any
+from uuid import uuid4
 
-from langchain.agents import create_agent
-from langchain.messages import AIMessage, AIMessageChunk, AnyMessage, ToolMessage
-
-from langchain_groq import ChatGroq
-from langgraph.config import get_stream_writer  
 # from langgraph.checkpoint.postgres import PostgresSaver
 # from psycopg_pool import ConnectionPool
 from django.conf import settings
-
-from django.core.mail import send_mail
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes, force_str
-
-from pydantic import BaseModel, Field
-from langchain.agents import create_agent
-from langchain.tools import tool
-from langchain_community.tools import DuckDuckGoSearchRun
-import json
-from django.http import StreamingHttpResponse
-from .serializers import MessageSerializer, PasswordResetRequestSerializer, PasswordResetValidateSerializer, PasswordResetConfirmSerializer
-
 from django.contrib.auth import get_user_model, update_session_auth_hash
+from django.contrib.auth.tokens import default_token_generator
+from django.db import transaction
+from django.http import StreamingHttpResponse
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
+from langchain.messages import AnyMessage
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_groq import ChatGroq
+from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
+from rest_framework import status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .serializers import (
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetValidateSerializer,
+)
+
 User = get_user_model()
 
-from typing import Any
-from langchain.agents import create_agent
-from langchain.agents.middleware import HumanInTheLoopMiddleware
-from langchain.messages import AIMessage, AIMessageChunk, AnyMessage, ToolMessage
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command, Interrupt
 
+from dataclasses import dataclass
+
+from langchain_core.messages.utils import count_tokens_approximately
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.graph import MessagesState
+from langgraph.runtime import Runtime
+from langgraph.store.postgres import PostgresStore
+from langmem.short_term import RunningSummary, SummarizationNode
+from psycopg_pool import ConnectionPool
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.throttling import SimpleRateThrottle
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
 
-from .serializers import SignupSerializer, UpdateUserProfileSerializer, EmailTokenObtainPairSerializer, PasswordChangeSerializer
-from django.conf import settings
-from langchain_groq import ChatGroq
-from django.http import StreamingHttpResponse
-
-from langchain.messages import AnyMessage
-from langchain_core.messages.utils import count_tokens_approximately
-from langmem.short_term import SummarizationNode, RunningSummary 
-from langgraph.graph import StateGraph, MessagesState, START, END
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.store.postgres import PostgresStore
-from django.http import StreamingHttpResponse
-from psycopg_pool import ConnectionPool
-from dataclasses import dataclass
-from langgraph.runtime import Runtime
-from typing import Annotated, TypedDict, Union, Dict, Any
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from .models import ChatSession, ConversationMessage, SchemaProject
-from rest_framework.throttling import SimpleRateThrottle
-from rest_framework.decorators import api_view, throttle_classes
-from django.core.mail import EmailMultiAlternatives
-from django.utils.html import strip_tags
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
-from core.utils import generate_chat_title
-from core.services.email import send_verification_email, send_password_reset_email
+from core.services.email import send_password_reset_email, send_verification_email
 from core.services.sample_data import provision_sample_connections
+from core.utils import generate_chat_title
+
+from .models import ChatSession, ConversationMessage, SchemaProject
+from .serializers import (
+    EmailTokenObtainPairSerializer,
+    PasswordChangeSerializer,
+    SignupSerializer,
+    UpdateUserProfileSerializer,
+)
+
 # from rest_framework.throttling import UserRateThrottle
 
 
@@ -85,11 +67,12 @@ class EmailTokenObtainPairView(TokenObtainPairView):
 
 
 class FivePerMinuteThrottle(SimpleRateThrottle):
-    scope = 'signup'
+    scope = "signup"
 
     def get_cache_key(self, request, view):
         # throttle by IP address
         return self.get_ident(request)
+
 
 class PasswordResetThrottle(SimpleRateThrottle):
     scope = "password_reset"
@@ -98,7 +81,7 @@ class PasswordResetThrottle(SimpleRateThrottle):
         return self.get_ident(request)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([FivePerMinuteThrottle])
 def signup(request):
@@ -113,8 +96,10 @@ def signup(request):
             provision_sample_connections(user)
         except Exception:
             import logging
+
             logging.getLogger(__name__).exception(
-                "Failed to provision sample connections for user %s", user.pk,
+                "Failed to provision sample connections for user %s",
+                user.pk,
             )
 
         try:
@@ -142,7 +127,7 @@ def signup(request):
     )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @throttle_classes([FivePerMinuteThrottle])
 def logout(request):
     try:
@@ -151,13 +136,10 @@ def logout(request):
         token.blacklist()
         return Response({"message": "Logged out successfully"})
     except Exception:
-        return Response(
-            {"error": "Invalid refresh token"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({"error": "Invalid refresh token"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([FivePerMinuteThrottle])
 def email_verify(request):
@@ -170,8 +152,8 @@ def email_verify(request):
     The caller (frontend) shows a "verified — please log in" state and the
     user logs in explicitly on the device they want to use.
     """
-    uid = request.data.get('uid')
-    token = request.data.get('token')
+    uid = request.data.get("uid")
+    token = request.data.get("token")
 
     if not uid or not token:
         return Response(
@@ -200,71 +182,81 @@ def email_verify(request):
         user.email_verified = True
         user.save()
 
-    return Response({
-        "success": True,
-        "message": "Email verified successfully. You can now log in.",
-    })
+    return Response(
+        {
+            "success": True,
+            "message": "Email verified successfully. You can now log in.",
+        }
+    )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([FivePerMinuteThrottle])
 def resend_verification(request):
     """Resend verification email if account exists and is unverified."""
-    email = request.data.get('email', '').lower()
+    email = request.data.get("email", "").lower()
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
         user = None
 
-    if user and not getattr(user, 'email_verified', False):
+    if user and not getattr(user, "email_verified", False):
         try:
             send_verification_email(user)
         except Exception:
             # Generic response anyway — don't reveal send failures to callers.
             pass
-    return Response({
-        "message": "If the account exists and is not verified, a verification email has been sent."
-    })
+    return Response(
+        {
+            "message": "If the account exists and is not verified, a verification email has been sent."
+        }
+    )
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 def current_user(request):
     user = request.user
-    return Response({
-        "id": user.id,
-        "email": user.email,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        # "username": user.username,
-    })
+    return Response(
+        {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            # "username": user.username,
+        }
+    )
 
 
-@api_view(['PUT'])
+@api_view(["PUT"])
 def update_user_profile(request):
     """
     Update the currently authenticated user's first name and last name.
     Required fields: first_name, last_name
-    """    
+    """
     serializer = UpdateUserProfileSerializer(request.user, data=request.data, partial=True)
     if serializer.is_valid():
         serializer.save()
-        return Response({
-            'user': {
-                'id': request.user.id,
-                'email': request.user.email,
-                'first_name': request.user.first_name,
-                'last_name': request.user.last_name,
-                # 'username': request.user.username
+        return Response(
+            {
+                "user": {
+                    "id": request.user.id,
+                    "email": request.user.email,
+                    "first_name": request.user.first_name,
+                    "last_name": request.user.last_name,
+                    # 'username': request.user.username
+                },
+                "message": "Profile updated successfully",
             },
-            'message': 'Profile updated successfully'
-        }, status=status.HTTP_200_OK)
+            status=status.HTTP_200_OK,
+        )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ===== PASSWORD RESET ENDPOINTS =====
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([PasswordResetThrottle])
 def password_reset(request):
@@ -275,7 +267,7 @@ def password_reset(request):
     """
     serializer = PasswordResetRequestSerializer(data=request.data)
     if serializer.is_valid():
-        email = serializer.validated_data['email']
+        email = serializer.validated_data["email"]
         try:
             user = User.objects.get(email=email)
             send_password_reset_email(user)
@@ -288,11 +280,11 @@ def password_reset(request):
 
     return Response(
         {"message": "If the account exists, a password reset link has been sent."},
-        status=status.HTTP_200_OK
+        status=status.HTTP_200_OK,
     )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([PasswordResetThrottle])
 def password_reset_validate(request):
@@ -302,34 +294,31 @@ def password_reset_validate(request):
     """
     serializer = PasswordResetValidateSerializer(data=request.data)
     if serializer.is_valid():
-        uid = serializer.validated_data['uid']
-        token = serializer.validated_data['token']
-        
+        uid = serializer.validated_data["uid"]
+        token = serializer.validated_data["token"]
+
         try:
             uid_decoded = force_str(urlsafe_base64_decode(uid))
             user = User.objects.get(pk=uid_decoded)
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
             return Response(
                 {"valid": False, "message": "Invalid or expired token."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         # Check token validity
         if default_token_generator.check_token(user, token):
-            return Response(
-                {"valid": True},
-                status=status.HTTP_200_OK
-            )
+            return Response({"valid": True}, status=status.HTTP_200_OK)
         else:
             return Response(
                 {"valid": False, "message": "Invalid or expired token."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
-    
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([PasswordResetThrottle])
 def password_reset_confirm(request):
@@ -339,26 +328,24 @@ def password_reset_confirm(request):
     """
     serializer = PasswordResetConfirmSerializer(data=request.data)
     if serializer.is_valid():
-        uid = serializer.validated_data['uid']
-        token = serializer.validated_data['token']
-        password = serializer.validated_data['password1']
-        
+        uid = serializer.validated_data["uid"]
+        token = serializer.validated_data["token"]
+        password = serializer.validated_data["password1"]
+
         try:
             uid_decoded = force_str(urlsafe_base64_decode(uid))
             user = User.objects.get(pk=uid_decoded)
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
             return Response(
-                {"message": "Invalid or expired token."},
-                status=status.HTTP_400_BAD_REQUEST
+                {"message": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Re-validate token (security measure)
         if not default_token_generator.check_token(user, token):
             return Response(
-                {"message": "Invalid or expired token."},
-                status=status.HTTP_400_BAD_REQUEST
+                {"message": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Atomic: the password change and the invalidation of existing refresh
         # tokens must succeed together. Partial state (new password set but old
         # tokens still valid) is a security issue.
@@ -369,15 +356,12 @@ def password_reset_confirm(request):
             for token in OutstandingToken.objects.filter(user=user):
                 BlacklistedToken.objects.get_or_create(token=token)
 
-        return Response(
-            {"message": "Password reset successful."},
-            status=status.HTTP_200_OK
-        )
-    
+        return Response({"message": "Password reset successful."}, status=status.HTTP_200_OK)
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])  # Requires authentication
 @throttle_classes([PasswordResetThrottle])
 def password_change(request):
@@ -386,48 +370,44 @@ def password_change(request):
     User must provide old password and new password.
     """
     user = request.user
-    
+
     serializer = PasswordChangeSerializer(data=request.data)
     if serializer.is_valid():
-        old_password = serializer.validated_data['old_password']
-        new_password = serializer.validated_data['new_password1']
-        
+        old_password = serializer.validated_data["old_password"]
+        new_password = serializer.validated_data["new_password1"]
+
         # Check old password matches
         if not user.check_password(old_password):
             return Response(
-                {"old_password": ["Old password is incorrect."]},
-                status=status.HTTP_400_BAD_REQUEST
+                {"old_password": ["Old password is incorrect."]}, status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Set new password
         user.set_password(new_password)
         user.save()
-        
+
         # Keep user logged in after password change
         update_session_auth_hash(request, user)
-        
-        return Response(
-            {"message": "Password changed successfully."},
-            status=status.HTTP_200_OK
-        )
-    
+
+        return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # def password_change(request):
 #     user = request.user
-    
+
 #     serializer = PasswordChangeSerializer(data=request.data)
 #     if serializer.is_valid():
 #         old_password = serializer.validated_data['old_password']
 #         new_password = serializer.validated_data['new_password1']
-        
+
 #         if not user.check_password(old_password):
 #             return Response(
 #                 {"old_password": ["Old password is incorrect."]},
 #                 status=status.HTTP_400_BAD_REQUEST
 #             )
-        
+
 #         user.set_password(new_password)
 #         user.save()
 
@@ -440,7 +420,7 @@ def password_change(request):
 #             {"message": "Password changed successfully. Please log in again."},
 #             status=status.HTTP_200_OK
 #         )
-    
+
 #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -470,30 +450,38 @@ gemini_llm = ChatGoogleGenerativeAI(
     timeout=60,
     api_key=gemini_api_key,
     max_retries=3,
-    streaming=False
+    streaming=False,
 )
 
 
 class MemoryExtraction(BaseModel):
     """Extracted facts to remember about the user."""
-    facts: list[str] = Field(description="New facts about the user's preferences, identity, or history.")
+
+    facts: list[str] = Field(
+        description="New facts about the user's preferences, identity, or history."
+    )
+
 
 memory_extractor = llm.with_structured_output(MemoryExtraction)
+
 
 @dataclass
 class UserContext:
     user_id: str
 
+
 class SummaryState(MessagesState):
     context: dict[str, RunningSummary]
 
-class LLMInputState(TypedDict):  
+
+class LLMInputState(TypedDict):
     summarized_messages: list[AnyMessage]
     context: dict[str, RunningSummary]
 
+
 summarization_model = llm.bind(max_tokens=256)
 
-summarization_node = SummarizationNode(  
+summarization_node = SummarizationNode(
     token_counter=count_tokens_approximately,
     model=summarization_model,
     max_tokens=1000,
@@ -501,35 +489,32 @@ summarization_node = SummarizationNode(
     max_summary_tokens=256,
 )
 
+
 def manage_memories(state: SummaryState, runtime: Runtime[UserContext]):
     user_id = runtime.context.user_id
     namespace = (user_id, "memories")
-    
+
     # Get the last turn of the conversation
     last_user_msg = state["messages"][-2].content
     last_ai_msg = state["messages"][-1].content
-    
+
     # Analyze if there's anything worth remembering
 
     prompt = f"""Analyze the following exchange. Extract any permanent user facts (hobbies, likes, dislikes, profession).
     If no new permanent facts are found, return an empty list.
-    
+
     User: {last_user_msg}
     AI: {last_ai_msg}"""
-    
+
     extracted = memory_extractor.invoke(prompt)
-    
+
     if extracted.facts:
         for fact in extracted.facts:
             # We use a UUID or hash as the key to avoid overwriting "profile_test"
             memory_id = str(uuid4())
-            runtime.store.put(
-                namespace,
-                memory_id,
-                {"data": fact}
-            )
-            
-    return state # Passing state through
+            runtime.store.put(namespace, memory_id, {"data": fact})
+
+    return state  # Passing state through
 
 
 # def call_model(state: MessagesState, runtime: Runtime[UserContext]):
@@ -537,7 +522,7 @@ def call_model(state: LLMInputState, runtime: Runtime[UserContext]):
     user_id = runtime.context.user_id
     namespace = (user_id, "memories")
     user_input = state["summarized_messages"][-1].content
-    
+
     # print("=== Summarized Messages ===")
     # print(state["summarized_messages"])
     # context = state.get("context")
@@ -549,54 +534,50 @@ def call_model(state: LLMInputState, runtime: Runtime[UserContext]):
     #         print(f"Summary Text: {value.summary}")
     #         print(f"Last Summarized ID: {value.last_summarized_message_id}")
 
-    # SEMANTIC SEARCH: 
-    memories = runtime.store.search(
-        namespace, 
-        query=user_input, 
-        limit=3
-    )
-    
+    # SEMANTIC SEARCH:
+    memories = runtime.store.search(namespace, query=user_input, limit=3)
+
     memory_list = []
     for m in memories:
         data_value = m.value.get("data", "")
         memory_list.append(str(data_value))
-    
+
     memory_context = "\n".join(memory_list) if memory_list else ""
-    
+
     if memory_context:
         system_message = {
             "role": "system",
-            "content": f"Relevant memories about user:\n{memory_context}"
+            "content": f"Relevant memories about user:\n{memory_context}",
         }
         updated_messages = [system_message] + state["summarized_messages"]
     else:
         updated_messages = state["summarized_messages"]
 
     response = llm.invoke(updated_messages)
-    
+
     # runtime.store.put(
-    #     namespace, 
+    #     namespace,
     #     "profile_test",
     #     {"data": "user likes cricket"}
     # )
     return {"messages": [response]}
+
 
 pool = ConnectionPool(DB_URI)
 pg_checkpointer = PostgresSaver(pool)
 # pg_store = PostgresStore(pool)
 
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="gemini-embedding-001",
-    google_api_key=gemini_api_key
-    )
+    model="gemini-embedding-001", google_api_key=gemini_api_key
+)
 
 pg_store = PostgresStore(
     pool,
     index={
         "embed": embeddings,
-        "dims": 1536, 
-        # "fields": ["data"] 
-    }
+        "dims": 1536,
+        # "fields": ["data"]
+    },
 )
 messagegraph = (
     # StateGraph(MessagesState, context_schema=UserContext)
@@ -604,7 +585,6 @@ messagegraph = (
     .add_node("summarize", summarization_node)
     .add_node("call_model", call_model)
     .add_node("manage_memories", manage_memories)
-
     .add_edge(START, "summarize")
     .add_edge("summarize", "call_model")
     .add_edge("call_model", "manage_memories")
@@ -615,23 +595,24 @@ chat_agent = messagegraph.compile(checkpointer=pg_checkpointer, store=pg_store)
 
 
 class AiChatView(APIView):
-    # authentication_classes = [] 
+    # authentication_classes = []
     # permission_classes = [AllowAny]
-    
+
     def post(self, request):
-        user_query = request.data.get('prompt')
-        thread_id = request.data.get('thread_id')
+        user_query = request.data.get("prompt")
+        thread_id = request.data.get("thread_id")
         user_id = str(request.user.id)
 
         if not user_query:
             return Response({"error": "Prompt is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         new_thread = False
         if not thread_id:
             thread_id = uuid4().hex[:12]
             new_thread = True
-        
+
         config = {"configurable": {"thread_id": thread_id}}
+
         def stream_generator():
             try:
                 # When stream_mode is a list, the generator yields: (mode, data)
@@ -639,7 +620,7 @@ class AiChatView(APIView):
                     {"messages": [{"role": "user", "content": user_query}]},
                     stream_mode=["messages", "updates"],
                     config=config,
-                    context=UserContext(user_id=user_id)
+                    context=UserContext(user_id=user_id),
                 ):
                     # -------------------------
                     # 1. MESSAGE EVENTS (Tokens)
@@ -649,18 +630,20 @@ class AiChatView(APIView):
                         token, metadata = data
                         content = ""
 
-                        if hasattr(token, 'content_blocks') and token.content_blocks:
+                        if hasattr(token, "content_blocks") and token.content_blocks:
                             block = token.content_blocks[0]
-                            content = getattr(block, 'text', str(block))
-                        elif hasattr(token, 'content'):
+                            content = getattr(block, "text", str(block))
+                        elif hasattr(token, "content"):
                             content = token.content
 
                         if content:
-                            payload = json.dumps({
-                                "type": "message",
-                                "node": metadata.get('langgraph_node', 'unknown'),
-                                "text": content
-                            })
+                            payload = json.dumps(
+                                {
+                                    "type": "message",
+                                    "node": metadata.get("langgraph_node", "unknown"),
+                                    "text": content,
+                                }
+                            )
                             yield f"data: {payload}\n\n"
 
                     # -----------------------------------
@@ -674,7 +657,7 @@ class AiChatView(APIView):
                     #             # If the value is a list (like summarized_messages or messages)
                     #             if isinstance(value, list):
                     #                 node_output[key] = [
-                    #                     m.content if hasattr(m, 'content') else str(m) 
+                    #                     m.content if hasattr(m, 'content') else str(m)
                     #                     for m in value
                     #                 ]
                     #             # If the value is a single message object
@@ -682,7 +665,7 @@ class AiChatView(APIView):
                     #                 node_output[key] = value.content
                     #             else:
                     #                 node_output[key] = value
-                            
+
                     #         sanitized_data[node_name] = node_output
 
                     #     payload = json.dumps({
@@ -701,9 +684,7 @@ class AiChatView(APIView):
                     messages = snapshot.values.get("messages", [])[-2:]
 
                     title_input = "\n".join(
-                        dict(m).get("content", "")
-                        for m in messages
-                        if dict(m).get("content")
+                        dict(m).get("content", "") for m in messages if dict(m).get("content")
                     )
 
                     title = generate_chat_title(title_input)
@@ -714,25 +695,20 @@ class AiChatView(APIView):
                         title=title,
                     )
 
-                    payload = json.dumps({
-                        "type": "title",
-                        "thread_id": thread_id,
-                        "title": title
-                    })
+                    payload = json.dumps({"type": "title", "thread_id": thread_id, "title": title})
 
                     yield f"data: {payload}\n\n"
-        
-            except Exception as e:
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"  
 
-        response = StreamingHttpResponse(stream_generator(), content_type='text/event-stream')
-        response['Cache-Control'] = 'no-cache'
-        response['X-Accel-Buffering'] = 'no'
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+        response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
         return response
-        
+
 
 class ChatListView(APIView):
-
     def get(self, request):
         chats = ChatSession.objects.filter(user=request.user).order_by("-created_at")
 
@@ -741,15 +717,15 @@ class ChatListView(APIView):
                 "thread_id": c.thread_id,
                 "title": c.title,
                 "is_starred": c.is_starred,
-                "created_at": c.created_at
+                "created_at": c.created_at,
             }
             for c in chats
         ]
 
         return Response(data)
-    
-class ChatDetailView(APIView):
 
+
+class ChatDetailView(APIView):
     def patch(self, request, thread_id):
         # Accept any subset of {title, is_starred}. At least one must be present.
         title = request.data.get("title")
@@ -758,7 +734,7 @@ class ChatDetailView(APIView):
         if title is None and is_starred is None:
             return Response(
                 {"error": "At least one of 'title' or 'is_starred' is required"},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -767,8 +743,7 @@ class ChatDetailView(APIView):
             if title is not None:
                 if not title:
                     return Response(
-                        {"error": "Title cannot be empty"},
-                        status=status.HTTP_400_BAD_REQUEST
+                        {"error": "Title cannot be empty"}, status=status.HTTP_400_BAD_REQUEST
                     )
                 chat.title = title
 
@@ -777,16 +752,17 @@ class ChatDetailView(APIView):
 
             chat.save()
 
-            return Response({
-                "thread_id": chat.thread_id,
-                "title": chat.title,
-                "is_starred": chat.is_starred,
-            })
+            return Response(
+                {
+                    "thread_id": chat.thread_id,
+                    "title": chat.title,
+                    "is_starred": chat.is_starred,
+                }
+            )
 
         except ChatSession.DoesNotExist:
             return Response(
-                {"error": "Chat not found or access denied"},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "Chat not found or access denied"}, status=status.HTTP_404_NOT_FOUND
             )
 
     def delete(self, request, thread_id):
@@ -796,18 +772,16 @@ class ChatDetailView(APIView):
             pg_checkpointer.delete_thread(thread_id)
             chat.delete()
             ConversationMessage.objects.filter(
-                user=request.user, agent="sql", thread_id=thread_id,
+                user=request.user,
+                agent="sql",
+                thread_id=thread_id,
             ).delete()
 
-            return Response({
-                "message": "Chat deleted",
-                "thread_id": thread_id
-            })
+            return Response({"message": "Chat deleted", "thread_id": thread_id})
 
         except ChatSession.DoesNotExist:
             return Response(
-                {"error": "Chat not found or access denied"},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "Chat not found or access denied"}, status=status.HTTP_404_NOT_FOUND
             )
 
 
@@ -820,24 +794,26 @@ class BulkDeleteNonStarredView(APIView):
 
     Returns {"count": N} — total items removed (chats + schemas).
     """
+
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
         import logging
+
         log = logging.getLogger(__name__)
 
         # Snapshot identifiers before any deletion so we still know what to
         # clean from the checkpointer even if the ORM delete races.
         chat_thread_ids = list(
-            ChatSession.objects
-            .filter(user=request.user, is_starred=False)
-            .values_list("thread_id", flat=True)
+            ChatSession.objects.filter(user=request.user, is_starred=False).values_list(
+                "thread_id", flat=True
+            )
         )
 
         schema_slugs = list(
-            SchemaProject.objects
-            .filter(user=request.user, is_starred=False)
-            .values_list("slug", flat=True)
+            SchemaProject.objects.filter(user=request.user, is_starred=False).values_list(
+                "slug", flat=True
+            )
         )
 
         # Checkpointer cleanup is best-effort and runs on a separate connection
@@ -851,6 +827,7 @@ class BulkDeleteNonStarredView(APIView):
         # Schema agent has its own checkpointer instance — import lazily to
         # avoid a circular import at module load.
         from core.schema_agent import pg_checkpointer as schema_checkpointer
+
         for slug in schema_slugs:
             try:
                 schema_checkpointer.delete_thread(slug)
@@ -864,7 +841,8 @@ class BulkDeleteNonStarredView(APIView):
             SchemaProject.objects.filter(user=request.user, is_starred=False).delete()
             # Drop the search-index rows for everything that was removed.
             ConversationMessage.objects.filter(
-                user=request.user, thread_id__in=chat_thread_ids + schema_slugs,
+                user=request.user,
+                thread_id__in=chat_thread_ids + schema_slugs,
             ).delete()
 
         return Response({"count": len(chat_thread_ids) + len(schema_slugs)})
@@ -872,28 +850,32 @@ class BulkDeleteNonStarredView(APIView):
 
 def get_clean_chat_history(raw_messages, reverse=True):
     formatted_history = []
-    
+
     for message_tuple in raw_messages:
         # Convert list of lists [["content", "..."], ["type", "human"]] to dict
         msg_dict = dict(message_tuple)
         role_type = msg_dict.get("type")
-        
+
         # We only care about human and ai roles
         if role_type in ["human", "ai"]:
-            formatted_history.append({
-                "role": "user" if role_type == "human" else "assistant",
-                "content": msg_dict.get("content", ""),
-                "id": msg_dict.get("id"),
-                "created_at": msg_dict.get("response_metadata", {}).get("created_at") # Optional
-            })
+            formatted_history.append(
+                {
+                    "role": "user" if role_type == "human" else "assistant",
+                    "content": msg_dict.get("content", ""),
+                    "id": msg_dict.get("id"),
+                    "created_at": msg_dict.get("response_metadata", {}).get(
+                        "created_at"
+                    ),  # Optional
+                }
+            )
 
     if reverse:
         formatted_history.reverse()
-        
+
     return formatted_history
 
-class ChatHistoryView(APIView):
 
+class ChatHistoryView(APIView):
     def get(self, request, thread_id):
         user = request.user
 
@@ -910,8 +892,8 @@ class ChatHistoryView(APIView):
 
         try:
             # 2. Pull raw messages from the SQL agent's checkpointer.
-            from core.sql_agent import sql_agent
             from core.services.chat_history_formatter import format_chat_history
+            from core.sql_agent import sql_agent
 
             config = {"configurable": {"thread_id": thread_id}}
             state = sql_agent.get_state(config)
@@ -931,32 +913,32 @@ class ChatHistoryView(APIView):
             )
 
         except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ── Token Usage ─────────────────────────────────────────────────────
 
+
 class UsageView(APIView):
     """GET /api/usage/?granularity=hour|day|month|year — token usage for the caller."""
+
     permission_classes = [IsAuthenticated]
 
     GRANULARITY_CONFIG = {
-        "hour":  {"days": 1,    "trunc_kind": "hour"},
-        "day":   {"days": 30,   "trunc_kind": "day"},
-        "month": {"days": 365,  "trunc_kind": "month"},
+        "hour": {"days": 1, "trunc_kind": "hour"},
+        "day": {"days": 30, "trunc_kind": "day"},
+        "month": {"days": 365, "trunc_kind": "month"},
     }
 
     QUOTA = 1_000_000  # tokens — TODO: per-user override later
 
     def get(self, request):
         from datetime import timedelta
-        from django.utils import timezone
+
         from django.db.models import Sum
         from django.db.models.functions import TruncDate, TruncHour, TruncMonth
+        from django.utils import timezone
+
         from core.models import TokenUsage
 
         granularity = request.query_params.get("granularity", "day")
@@ -970,15 +952,14 @@ class UsageView(APIView):
         since = timezone.now() - timedelta(days=config["days"])
 
         trunc_map = {
-            "hour":  TruncHour("created_at"),
-            "day":   TruncDate("created_at"),
+            "hour": TruncHour("created_at"),
+            "day": TruncDate("created_at"),
             "month": TruncMonth("created_at"),
         }
         trunc = trunc_map[config["trunc_kind"]]
 
         rows = (
-            TokenUsage.objects
-            .filter(user=request.user, created_at__gte=since)
+            TokenUsage.objects.filter(user=request.user, created_at__gte=since)
             .annotate(bucket=trunc)
             .values("bucket")
             .annotate(
@@ -997,25 +978,28 @@ class UsageView(APIView):
 
         percent_used = round((total_used / self.QUOTA) * 100, 2) if self.QUOTA else 0
 
-        return Response({
-            "granularity": granularity,
-            "buckets": [
-                {
-                    "bucket": r["bucket"].isoformat() if r["bucket"] else None,
-                    "input_tokens": r["input_tokens"] or 0,
-                    "output_tokens": r["output_tokens"] or 0,
-                    "reasoning_tokens": r["reasoning_tokens"] or 0,
-                    "total_tokens": r["total_tokens"] or 0,
-                }
-                for r in rows
-            ],
-            "total_used": total_used,
-            "quota": self.QUOTA,
-            "percent_used": percent_used,
-        })
+        return Response(
+            {
+                "granularity": granularity,
+                "buckets": [
+                    {
+                        "bucket": r["bucket"].isoformat() if r["bucket"] else None,
+                        "input_tokens": r["input_tokens"] or 0,
+                        "output_tokens": r["output_tokens"] or 0,
+                        "reasoning_tokens": r["reasoning_tokens"] or 0,
+                        "total_tokens": r["total_tokens"] or 0,
+                    }
+                    for r in rows
+                ],
+                "total_used": total_used,
+                "quota": self.QUOTA,
+                "percent_used": percent_used,
+            }
+        )
 
 
 # ── Chat search ─────────────────────────────────────────────────────
+
 
 def _search_snippet(text: str, query: str, radius: int = 40) -> str:
     """Return a short window of `text` around the first occurrence of `query`."""
@@ -1027,11 +1011,7 @@ def _search_snippet(text: str, query: str, radius: int = 40) -> str:
         return head + ("…" if len(text) > radius * 2 else "")
     start = max(0, idx - radius)
     end = min(len(text), idx + len(query) + radius)
-    return (
-        ("…" if start > 0 else "")
-        + text[start:end].strip()
-        + ("…" if end < len(text) else "")
-    )
+    return ("…" if start > 0 else "") + text[start:end].strip() + ("…" if end < len(text) else "")
 
 
 class ChatSearchView(APIView):
@@ -1042,6 +1022,7 @@ class ChatSearchView(APIView):
         {agent: "sql"|"schema", thread_id, title, matched_text|null, rank}
     Title matches carry rank 1.0 so they sort above content matches.
     """
+
     permission_classes = [IsAuthenticated]
 
     MIN_QUERY_LEN = 2
@@ -1049,8 +1030,9 @@ class ChatSearchView(APIView):
     CONTENT_LIMIT = 60
 
     def get(self, request):
-        from django.db.models import Q
         from django.contrib.postgres.search import SearchQuery, SearchRank
+        from django.db.models import Q
+
         from core.models import ConversationMessage
 
         query = (request.query_params.get("q") or "").strip()
@@ -1063,36 +1045,44 @@ class ChatSearchView(APIView):
 
         # ── 1. Title matches (substring, cheap) ───────────────────────
         chats = ChatSession.objects.filter(
-            user=user, title__icontains=query,
+            user=user,
+            title__icontains=query,
         ).order_by("-created_at")[: self.TITLE_LIMIT]
         for chat in chats:
             seen.add(("sql", chat.thread_id))
-            results.append({
-                "agent": "sql",
-                "thread_id": chat.thread_id,
-                "title": chat.title or "Untitled chat",
-                "matched_text": None,
-                "rank": 1.0,
-            })
+            results.append(
+                {
+                    "agent": "sql",
+                    "thread_id": chat.thread_id,
+                    "title": chat.title or "Untitled chat",
+                    "matched_text": None,
+                    "rank": 1.0,
+                }
+            )
 
-        projects = SchemaProject.objects.filter(user=user).filter(
-            Q(name__icontains=query) | Q(description__icontains=query),
-        ).order_by("-updated_at")[: self.TITLE_LIMIT]
+        projects = (
+            SchemaProject.objects.filter(user=user)
+            .filter(
+                Q(name__icontains=query) | Q(description__icontains=query),
+            )
+            .order_by("-updated_at")[: self.TITLE_LIMIT]
+        )
         for project in projects:
             seen.add(("schema", project.slug))
-            results.append({
-                "agent": "schema",
-                "thread_id": project.slug,
-                "title": project.name or "Untitled schema",
-                "matched_text": None,
-                "rank": 1.0,
-            })
+            results.append(
+                {
+                    "agent": "schema",
+                    "thread_id": project.slug,
+                    "title": project.name or "Untitled schema",
+                    "matched_text": None,
+                    "rank": 1.0,
+                }
+            )
 
         # ── 2. Message-content matches (full-text, ranked) ────────────
         search_query = SearchQuery(query, config="english")
         hits = (
-            ConversationMessage.objects
-            .filter(user=user, search_vector=search_query)
+            ConversationMessage.objects.filter(user=user, search_vector=search_query)
             .annotate(rank=SearchRank("search_vector", search_query))
             .order_by("-rank")[: self.CONTENT_LIMIT]
         )
@@ -1108,14 +1098,12 @@ class ChatSearchView(APIView):
         sql_ids = [tid for (agent, tid) in best if agent == "sql"]
         schema_ids = [tid for (agent, tid) in best if agent == "schema"]
         sql_titles = dict(
-            ChatSession.objects
-            .filter(user=user, thread_id__in=sql_ids)
-            .values_list("thread_id", "title")
+            ChatSession.objects.filter(user=user, thread_id__in=sql_ids).values_list(
+                "thread_id", "title"
+            )
         )
         schema_titles = dict(
-            SchemaProject.objects
-            .filter(user=user, slug__in=schema_ids)
-            .values_list("slug", "name")
+            SchemaProject.objects.filter(user=user, slug__in=schema_ids).values_list("slug", "name")
         )
 
         for (agent, thread_id), hit in best.items():
@@ -1125,17 +1113,17 @@ class ChatSearchView(APIView):
             else:
                 title = schema_titles.get(thread_id)
                 fallback = "Untitled schema"
-            if title is None and thread_id not in (
-                sql_titles if agent == "sql" else schema_titles
-            ):
+            if title is None and thread_id not in (sql_titles if agent == "sql" else schema_titles):
                 continue  # thread deleted or not owned — skip orphan index row
-            results.append({
-                "agent": agent,
-                "thread_id": thread_id,
-                "title": title or fallback,
-                "matched_text": _search_snippet(hit.text, query),
-                "rank": float(hit.rank),
-            })
+            results.append(
+                {
+                    "agent": agent,
+                    "thread_id": thread_id,
+                    "title": title or fallback,
+                    "matched_text": _search_snippet(hit.text, query),
+                    "rank": float(hit.rank),
+                }
+            )
 
         results.sort(key=lambda r: r["rank"], reverse=True)
         return Response({"results": results})

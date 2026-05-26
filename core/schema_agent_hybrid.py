@@ -66,9 +66,7 @@ class SchemaAgentHybrid(APIView):
         thread_id = str(request.data.get("thread_id") or uuid4().hex)
 
         if not query:
-            return Response(
-                {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         requested_model = request.data.get("model") or DEFAULT_MODEL
         model = requested_model if requested_model in SUPPORTED_MODELS else DEFAULT_MODEL
@@ -132,9 +130,7 @@ class SchemaAgentHybrid(APIView):
                     initial["sql"] = project.sql_json
                     initial["seed_data"] = project.seed_json
             except Exception:
-                logger.exception(
-                    "Could not seed hybrid state from project %s", thread_id
-                )
+                logger.exception("Could not seed hybrid state from project %s", thread_id)
 
         def stream_generator():
             produced_response = False
@@ -173,23 +169,27 @@ class SchemaAgentHybrid(APIView):
                         if content:
                             text = str(content)
                             final_text += text
-                            yield _sse({
-                                "type": "token",
-                                "kind": "text",
-                                "node": "respond",
-                                "text": text,
-                            })
+                            yield _sse(
+                                {
+                                    "type": "token",
+                                    "kind": "text",
+                                    "node": "respond",
+                                    "text": text,
+                                }
+                            )
 
                     # ── 2. UPDATES — node progress + artifact results ────────
                     elif mode == "updates":
                         for node_name, state_update in data.items():
                             label = _NODE_LABELS.get(node_name)
                             if label:
-                                yield _sse({
-                                    "type": "node_start",
-                                    "node": node_name,
-                                    "label": label,
-                                })
+                                yield _sse(
+                                    {
+                                        "type": "node_start",
+                                        "node": node_name,
+                                        "label": label,
+                                    }
+                                )
 
                             if not isinstance(state_update, dict):
                                 continue
@@ -197,13 +197,15 @@ class SchemaAgentHybrid(APIView):
                             # gen_schema completed → emit SCHEMA result event.
                             if node_name == "gen_schema" and state_update.get("schema"):
                                 schema_artifact = state_update["schema"]
-                                yield _sse({
-                                    "type": "result",
-                                    "result_type": "SCHEMA",
-                                    "content": {
-                                        "schema_table": json.dumps(schema_artifact),
-                                    },
-                                })
+                                yield _sse(
+                                    {
+                                        "type": "result",
+                                        "result_type": "SCHEMA",
+                                        "content": {
+                                            "schema_table": json.dumps(schema_artifact),
+                                        },
+                                    }
+                                )
 
                             # gen_sql completed → emit SQL result event.
                             if node_name == "gen_sql" and (
@@ -211,14 +213,16 @@ class SchemaAgentHybrid(APIView):
                             ):
                                 sql_artifact = state_update.get("sql") or sql_artifact
                                 seed_artifact = state_update.get("seed_data") or seed_artifact
-                                yield _sse({
-                                    "type": "result",
-                                    "result_type": "SQL",
-                                    "content": {
-                                        "sql_table": sql_artifact or "",
-                                        "sql_seed_data": seed_artifact or "",
-                                    },
-                                })
+                                yield _sse(
+                                    {
+                                        "type": "result",
+                                        "result_type": "SQL",
+                                        "content": {
+                                            "sql_table": sql_artifact or "",
+                                            "sql_seed_data": seed_artifact or "",
+                                        },
+                                    }
+                                )
 
                 # ── 3. FINAL — done + persist + title + indexing ────────────
                 # Skipped on cancel: the `cancelled` SSE event has already been
@@ -246,36 +250,39 @@ class SchemaAgentHybrid(APIView):
                 final_seed = values.get("seed_data") or seed_artifact
 
                 if produced_response and (final_schema or final_sql):
-                    schema_json = (
-                        json.dumps(final_schema) if final_schema else project.schema_json
-                    )
+                    schema_json = json.dumps(final_schema) if final_schema else project.schema_json
                     sql_json = final_sql if final_sql else project.sql_json
                     seed_json = final_seed if final_seed else project.seed_json
                     if schema_json:
                         persist_schema_project(
-                            True, project.id, schema_json, sql_json, seed_json,
+                            True,
+                            project.id,
+                            schema_json,
+                            sql_json,
+                            seed_json,
                         )
 
                 # Title for the first successful turn of a new project.
                 if new_project and produced_response:
                     try:
-                        new_title = generate_chat_title(
-                            f"User: {query}\nAssistant: {final_text}"
-                        )
+                        new_title = generate_chat_title(f"User: {query}\nAssistant: {final_text}")
                         project.name = new_title
                         project.save(update_fields=["name"])
-                        yield _sse({
-                            "type": "title", "slug": thread_id, "title": new_title,
-                        })
-                    except Exception:
-                        logger.exception(
-                            "Hybrid schema title generation failed for %s", thread_id
+                        yield _sse(
+                            {
+                                "type": "title",
+                                "slug": thread_id,
+                                "title": new_title,
+                            }
                         )
+                    except Exception:
+                        logger.exception("Hybrid schema title generation failed for %s", thread_id)
 
                 # Mirror the conversation into the chat-search index.
                 if produced_response:
                     try:
                         from core.services.search_index import reindex_thread
+
                         reindex_thread(request.user, "schema", thread_id, final_messages)
                     except Exception:
                         logger.exception(
@@ -316,10 +323,13 @@ class SchemaAgentHybrid(APIView):
                 if new_project and not produced_response and not was_cancelled:
                     try:
                         SchemaProject.objects.filter(
-                            slug=thread_id, user=request.user,
+                            slug=thread_id,
+                            user=request.user,
                         ).delete()
                         ConversationMessage.objects.filter(
-                            user=request.user, agent="schema", thread_id=thread_id,
+                            user=request.user,
+                            agent="schema",
+                            thread_id=thread_id,
                         ).delete()
                         pg_checkpointer.delete_thread(thread_id)
                         logger.info(
@@ -331,9 +341,7 @@ class SchemaAgentHybrid(APIView):
                             "Failed to clean up empty hybrid SchemaProject %s", thread_id
                         )
 
-        response = StreamingHttpResponse(
-            stream_generator(), content_type="text/event-stream"
-        )
+        response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response

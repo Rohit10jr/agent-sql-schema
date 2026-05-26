@@ -24,9 +24,7 @@ class Command(BaseCommand):
         last_name = os.getenv("ADMIN_LAST_NAME", "User")
 
         if not email or not password:
-            self.stdout.write(
-                "ADMIN_EMAIL or ADMIN_PASSWORD not set — skipping admin creation."
-            )
+            self.stdout.write("ADMIN_EMAIL or ADMIN_PASSWORD not set — skipping admin creation.")
             return
 
         if User.objects.filter(email=email).exists():

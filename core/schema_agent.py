@@ -71,9 +71,7 @@ class SchemaAgent(APIView):
         thread_id = str(request.data.get("thread_id") or uuid4().hex)
 
         if not query:
-            return Response(
-                {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         requested_model = request.data.get("model") or DEFAULT_MODEL
         model = requested_model if requested_model in SUPPORTED_MODELS else DEFAULT_MODEL
@@ -96,8 +94,8 @@ class SchemaAgent(APIView):
         def stream_generator():
             produced_response = False
             final_text = ""
-            latest_schema: dict | None = None   # last generate_schema `schema` dict
-            latest_sql: dict | None = None      # last generate_sql artifact
+            latest_schema: dict | None = None  # last generate_schema `schema` dict
+            latest_sql: dict | None = None  # last generate_sql artifact
 
             try:
                 if new_project:
@@ -118,12 +116,14 @@ class SchemaAgent(APIView):
                         if content:
                             text = str(content)
                             final_text += text
-                            yield _sse({
-                                "type": "token",
-                                "kind": "text",
-                                "node": "agent",
-                                "text": text,
-                            })
+                            yield _sse(
+                                {
+                                    "type": "token",
+                                    "kind": "text",
+                                    "node": "agent",
+                                    "text": text,
+                                }
+                            )
 
                     # ─── 2. UPDATES — tool progress + artifact results ──────
                     elif mode == "updates":
@@ -138,11 +138,13 @@ class SchemaAgent(APIView):
                                     for call in getattr(msg, "tool_calls", None) or []:
                                         label = _TOOL_LABELS.get(call["name"])
                                         if label:
-                                            yield _sse({
-                                                "type": "node_start",
-                                                "node": call["name"],
-                                                "label": label,
-                                            })
+                                            yield _sse(
+                                                {
+                                                    "type": "node_start",
+                                                    "node": call["name"],
+                                                    "label": label,
+                                                }
+                                            )
 
                             # Tool finished → parse artifact JSON, emit result.
                             if node_name == "tools":
@@ -155,23 +157,27 @@ class SchemaAgent(APIView):
                                     kind = artifact.get("artifact")
                                     if kind == "schema" and artifact.get("schema"):
                                         latest_schema = artifact["schema"]
-                                        yield _sse({
-                                            "type": "result",
-                                            "result_type": "SCHEMA",
-                                            "content": {
-                                                "schema_table": json.dumps(latest_schema),
-                                            },
-                                        })
+                                        yield _sse(
+                                            {
+                                                "type": "result",
+                                                "result_type": "SCHEMA",
+                                                "content": {
+                                                    "schema_table": json.dumps(latest_schema),
+                                                },
+                                            }
+                                        )
                                     elif kind == "sql" and artifact.get("sql"):
                                         latest_sql = artifact
-                                        yield _sse({
-                                            "type": "result",
-                                            "result_type": "SQL",
-                                            "content": {
-                                                "sql_table": artifact.get("sql", ""),
-                                                "sql_seed_data": artifact.get("seed_data", ""),
-                                            },
-                                        })
+                                        yield _sse(
+                                            {
+                                                "type": "result",
+                                                "result_type": "SQL",
+                                                "content": {
+                                                    "sql_table": artifact.get("sql", ""),
+                                                    "sql_seed_data": artifact.get("seed_data", ""),
+                                                },
+                                            }
+                                        )
 
                 # ─── 3. FINAL — done + persist + title + indexing ──────────
                 final_state = schema_agent.get_state(config)
@@ -192,46 +198,41 @@ class SchemaAgent(APIView):
                         json.dumps(latest_schema) if latest_schema else project.schema_json
                     )
                     sql_json = latest_sql.get("sql") if latest_sql else project.sql_json
-                    seed_json = (
-                        latest_sql.get("seed_data") if latest_sql else project.seed_json
-                    )
+                    seed_json = latest_sql.get("seed_data") if latest_sql else project.seed_json
                     if schema_json:
                         persist_schema_project(
-                            True, project.id, schema_json, sql_json, seed_json,
+                            True,
+                            project.id,
+                            schema_json,
+                            sql_json,
+                            seed_json,
                         )
 
                 # Title generation on the first successful turn of a new project.
                 if new_project and produced_response:
                     try:
-                        new_title = generate_chat_title(
-                            f"User: {query}\nAssistant: {final_text}"
-                        )
+                        new_title = generate_chat_title(f"User: {query}\nAssistant: {final_text}")
                         project.name = new_title
                         project.save(update_fields=["name"])
                         yield _sse({"type": "title", "slug": thread_id, "title": new_title})
                     except Exception:
-                        logger.exception(
-                            "Schema-agent title generation failed for %s", thread_id
-                        )
+                        logger.exception("Schema-agent title generation failed for %s", thread_id)
 
                 # Mirror the conversation into the search index. Best-effort.
                 if produced_response:
                     try:
                         from core.services.search_index import reindex_thread
+
                         reindex_thread(request.user, "schema", thread_id, final_messages)
                     except Exception:
-                        logger.exception(
-                            "Failed to index schema thread %s for search", thread_id
-                        )
+                        logger.exception("Failed to index schema thread %s for search", thread_id)
 
                 # Post-stream long-term memory extraction. Best-effort.
                 if produced_response:
                     try:
                         ltm.extract_and_store(request.user.id, query, final_text)
                     except Exception:
-                        logger.exception(
-                            "Memory extraction failed for schema thread %s", thread_id
-                        )
+                        logger.exception("Memory extraction failed for schema thread %s", thread_id)
 
             except Exception as e:
                 logger.exception("Schema-agent stream failed")
@@ -243,10 +244,13 @@ class SchemaAgent(APIView):
                 if new_project and not produced_response:
                     try:
                         SchemaProject.objects.filter(
-                            slug=thread_id, user=request.user,
+                            slug=thread_id,
+                            user=request.user,
                         ).delete()
                         ConversationMessage.objects.filter(
-                            user=request.user, agent="schema", thread_id=thread_id,
+                            user=request.user,
+                            agent="schema",
+                            thread_id=thread_id,
                         ).delete()
                         pg_checkpointer.delete_thread(thread_id)
                         logger.info(
@@ -254,13 +258,9 @@ class SchemaAgent(APIView):
                             thread_id,
                         )
                     except Exception:
-                        logger.exception(
-                            "Failed to clean up empty SchemaProject %s", thread_id
-                        )
+                        logger.exception("Failed to clean up empty SchemaProject %s", thread_id)
 
-        response = StreamingHttpResponse(
-            stream_generator(), content_type="text/event-stream"
-        )
+        response = StreamingHttpResponse(stream_generator(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response

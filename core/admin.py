@@ -1,7 +1,8 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
-from .models import CustomUser, ChatSession, Connection, Result, TokenUsage, SchemaProject
+
+from .models import ChatSession, Connection, CustomUser, Result, SchemaProject, TokenUsage
 
 
 class CustomUserCreationForm(UserCreationForm):
@@ -22,7 +23,14 @@ class CustomUserAdmin(UserAdmin):
     form = CustomUserChangeForm
 
     # Fields to show in the table view
-    list_display = ("email", "first_name", "last_name", "get_full_name", "is_staff", "email_verified")
+    list_display = (
+        "email",
+        "first_name",
+        "last_name",
+        "get_full_name",
+        "is_staff",
+        "email_verified",
+    )
     list_filter = ("is_staff", "is_active", "email_verified")
     ordering = ("email",)
 
@@ -37,18 +45,21 @@ class CustomUserAdmin(UserAdmin):
 
     # Fields for creating a new user — MUST include password1/password2
     add_fieldsets = (
-        (None, {
-            "classes": ("wide",),
-            "fields": (
-                "email",
-                "first_name",
-                "last_name",
-                "password1",
-                "password2",
-                "is_active",
-                "is_staff",
-            ),
-        }),
+        (
+            None,
+            {
+                "classes": ("wide",),
+                "fields": (
+                    "email",
+                    "first_name",
+                    "last_name",
+                    "password1",
+                    "password2",
+                    "is_active",
+                    "is_staff",
+                ),
+            },
+        ),
     )
 
     search_fields = ("email", "first_name", "last_name")

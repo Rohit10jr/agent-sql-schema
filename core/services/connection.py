@@ -15,9 +15,9 @@ Key methods:
 
 import io
 import logging
+import os
 import sqlite3
 import tempfile
-import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -26,7 +26,7 @@ import pyreadstat
 from django.conf import settings
 from langchain_community.utilities.sql_database import SQLDatabase
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.exc import OperationalError, NoSuchModuleError, ProgrammingError
+from sqlalchemy.exc import NoSuchModuleError, OperationalError, ProgrammingError
 
 from core.models import Connection
 
@@ -65,11 +65,11 @@ def _is_user_schema(name: str) -> bool:
 
 class ConnectionError(Exception):
     """Raised when a database connection cannot be established."""
+
     pass
 
 
 class ConnectionService:
-
     # ── DSN Validation ──────────────────────────────────────────────
 
     @staticmethod
@@ -89,7 +89,9 @@ class ConnectionService:
                 try:
                     db = SQLDatabase.from_uri(docker_dsn)
                     if not db._engine.url.database:
-                        raise ConnectionError("Invalid DSN. Database name is missing — append '/DBNAME'.")
+                        raise ConnectionError(
+                            "Invalid DSN. Database name is missing — append '/DBNAME'."
+                        )
                     return db
                 except OperationalError:
                     raise ConnectionError("Failed to connect to database. Please check your DSN.")
@@ -126,11 +128,13 @@ class ConnectionService:
             views = inspector.get_view_names(schema=schema_name)
             all_tables = sorted(set(tables + views))
 
-            schemas.append({
-                "name": schema_name,
-                "enabled": True,
-                "tables": [{"name": t, "enabled": True} for t in all_tables],
-            })
+            schemas.append(
+                {
+                    "name": schema_name,
+                    "enabled": True,
+                    "tables": [{"name": t, "enabled": True} for t in all_tables],
+                }
+            )
 
         schemas.sort(key=lambda s: s["name"])
         return {"schemas": schemas}
@@ -161,17 +165,19 @@ class ConnectionService:
             views = inspector.get_view_names(schema=schema_name)
             all_tables = sorted(set(tables + views))
 
-            schemas.append({
-                "name": schema_name,
-                "enabled": old_schema_enabled.get(schema_name, False),
-                "tables": [
-                    {
-                        "name": t,
-                        "enabled": old_table_enabled.get((schema_name, t), False),
-                    }
-                    for t in all_tables
-                ],
-            })
+            schemas.append(
+                {
+                    "name": schema_name,
+                    "enabled": old_schema_enabled.get(schema_name, False),
+                    "tables": [
+                        {
+                            "name": t,
+                            "enabled": old_table_enabled.get((schema_name, t), False),
+                        }
+                        for t in all_tables
+                    ],
+                }
+            )
 
         schemas.sort(key=lambda s: s["name"])
         return {"schemas": schemas}
@@ -179,7 +185,9 @@ class ConnectionService:
     # ── Connection CRUD ─────────────────────────────────────────────
 
     @staticmethod
-    def create_connection(user, dsn: str, name: str, connection_type: str = None, is_sample: bool = False) -> Connection:
+    def create_connection(
+        user, dsn: str, name: str, connection_type: str = None, is_sample: bool = False
+    ) -> Connection:
         """Validate DSN, introspect schema, and save a new Connection."""
         db = ConnectionService.validate_and_connect(dsn)
 
@@ -218,13 +226,17 @@ class ConnectionService:
         return DATA_DIR / filename
 
     @staticmethod
-    def create_sqlite_connection(user, file_bytes: bytes, name: str, is_sample: bool = False) -> Connection:
+    def create_sqlite_connection(
+        user, file_bytes: bytes, name: str, is_sample: bool = False
+    ) -> Connection:
         """Create a connection from raw SQLite file bytes."""
         file_path = ConnectionService._generate_sqlite_path()
         file_path.write_bytes(file_bytes)
 
         dsn = f"sqlite:///{file_path.absolute()}"
-        return ConnectionService.create_connection(user, dsn=dsn, name=name, connection_type="sqlite", is_sample=is_sample)
+        return ConnectionService.create_connection(
+            user, dsn=dsn, name=name, connection_type="sqlite", is_sample=is_sample
+        )
 
     # Encoding fallback chain for CSV. Order matters:
     #   utf-8       — modern default; most exports from databases / web tools.
@@ -322,7 +334,9 @@ class ConnectionService:
         conn.close()
 
         dsn = f"sqlite:///{file_path.absolute()}"
-        return ConnectionService.create_connection(user, dsn=dsn, name=name, connection_type="excel")
+        return ConnectionService.create_connection(
+            user, dsn=dsn, name=name, connection_type="excel"
+        )
 
     @staticmethod
     def create_sas_connection(user, file_obj, name: str) -> Connection:
@@ -348,7 +362,9 @@ class ConnectionService:
             conn.close()
 
             dsn = f"sqlite:///{file_path.absolute()}"
-            return ConnectionService.create_connection(user, dsn=dsn, name=name, connection_type="sas")
+            return ConnectionService.create_connection(
+                user, dsn=dsn, name=name, connection_type="sas"
+            )
         finally:
             os.unlink(tmp_path)
 
@@ -361,7 +377,11 @@ class ConnectionService:
             new_dsn = data["dsn"]
 
             # Check duplicate (allow same connection to keep its own DSN)
-            existing = Connection.objects.filter(user=connection.user, dsn=new_dsn).exclude(id=connection.id).first()
+            existing = (
+                Connection.objects.filter(user=connection.user, dsn=new_dsn)
+                .exclude(id=connection.id)
+                .first()
+            )
             if existing:
                 raise ConnectionError("Another connection with this DSN already exists.")
 
@@ -409,7 +429,8 @@ class ConnectionService:
         enabled_schemas: list[dict] = []
         if options and options.get("schemas"):
             enabled_schemas = [
-                s for s in options["schemas"]
+                s
+                for s in options["schemas"]
                 if s.get("enabled") and _is_user_schema(s.get("name", ""))
             ]
 
@@ -421,11 +442,7 @@ class ConnectionService:
         # Single schema → scope SQLDatabase to it; pass bare table names.
         if len(enabled_schemas) == 1:
             schema = enabled_schemas[0]
-            include_tables = [
-                t["name"]
-                for t in schema.get("tables", [])
-                if t.get("enabled")
-            ]
+            include_tables = [t["name"] for t in schema.get("tables", []) if t.get("enabled")]
             engine = create_engine(connection.dsn)
             return SQLDatabase(
                 engine,
@@ -436,10 +453,7 @@ class ConnectionService:
         # Multiple schemas → no scoping; SQLDatabase looks at the default schema.
         # Only include enabled tables from that schema (best-effort fallback).
         include_tables = [
-            t["name"]
-            for s in enabled_schemas
-            for t in s.get("tables", [])
-            if t.get("enabled")
+            t["name"] for s in enabled_schemas for t in s.get("tables", []) if t.get("enabled")
         ]
         engine = create_engine(connection.dsn)
         return SQLDatabase(

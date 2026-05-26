@@ -1,11 +1,13 @@
 import logging
 
 import sqlglot
-from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from langchain_core.messages import AIMessage, HumanMessage
 from rest_framework import status
-from rest_framework.generics import ListAPIView, RetrieveDestroyAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.generics import (
+    ListAPIView,
+    RetrieveUpdateDestroyAPIView,
+)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -39,21 +41,25 @@ def _format_schema_history(raw_messages) -> list[dict]:
 
     def flush_assistant():
         if pending_assistant:
-            turns.append({
-                "id": len(turns),
-                "role": "assistant",
-                "text": "\n\n".join(t for t in pending_assistant if t),
-            })
+            turns.append(
+                {
+                    "id": len(turns),
+                    "role": "assistant",
+                    "text": "\n\n".join(t for t in pending_assistant if t),
+                }
+            )
             pending_assistant.clear()
 
     for msg in raw_messages:
         if isinstance(msg, HumanMessage):
             flush_assistant()
-            turns.append({
-                "id": len(turns),
-                "role": "user",
-                "text": str(msg.content or ""),
-            })
+            turns.append(
+                {
+                    "id": len(turns),
+                    "role": "user",
+                    "text": str(msg.content or ""),
+                }
+            )
         elif isinstance(msg, AIMessage):
             content = str(msg.content or "").strip()
             if content:
@@ -97,13 +103,17 @@ class SchemaProjectDetailView(RetrieveUpdateDestroyAPIView):
         instance.delete()
 
         from .models import ConversationMessage
+
         ConversationMessage.objects.filter(
-            user=user, agent="schema", thread_id=slug,
+            user=user,
+            agent="schema",
+            thread_id=slug,
         ).delete()
 
         try:
             # Imported lazily to avoid circular import at module load.
             from .schema_agent import pg_checkpointer
+
             pg_checkpointer.delete_thread(slug)
         except Exception:
             logger.exception("Failed to clear schema-agent checkpoint for slug %s", slug)
@@ -112,6 +122,7 @@ class SchemaProjectDetailView(RetrieveUpdateDestroyAPIView):
     def _fetch_history(slug: str) -> list[dict]:
         try:
             from .schema_agent import schema_agent
+
             config = {"configurable": {"thread_id": slug}}
             state = schema_agent.get_state(config)
             if not state or "messages" not in state.values:
@@ -126,12 +137,13 @@ class SchemaProjectDetailView(RetrieveUpdateDestroyAPIView):
 # ===== Schema variants =====
 # ===========================
 
+
 class GetSQLVariantView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        project_id = request.data.get('project_id')
-        target_dialect = request.data.get('sql_type') # e.g., 'mysql' or 'postgres'
+        project_id = request.data.get("project_id")
+        target_dialect = request.data.get("sql_type")  # e.g., 'mysql' or 'postgres'
 
         if not project_id or not target_dialect:
             return Response({"error": "Missing project_id or sql_type"}, status=400)
@@ -147,13 +159,17 @@ class GetSQLVariantView(APIView):
         try:
             # We transpile both the table structure and the seed data
             # Use sqlglot.transpile(...)[0] or join if there are multiple
-            
-            raw_table_sql = project.sql_json # Your source SQL string
-            raw_seed_sql = project.seed_json # Your source Seed string
-            
+
+            raw_table_sql = project.sql_json  # Your source SQL string
+            raw_seed_sql = project.seed_json  # Your source Seed string
+
             # Conversion
-            new_table_sql = "\n\n".join(sqlglot.transpile(raw_table_sql, write=target_dialect, pretty=True))
-            new_seed_sql = "\n\n".join(sqlglot.transpile(raw_seed_sql, write=target_dialect, pretty=True))
+            new_table_sql = "\n\n".join(
+                sqlglot.transpile(raw_table_sql, write=target_dialect, pretty=True)
+            )
+            new_seed_sql = "\n\n".join(
+                sqlglot.transpile(raw_seed_sql, write=target_dialect, pretty=True)
+            )
 
             # 4. Save to nested JSON
             project.save_variant(target_dialect, new_table_sql, new_seed_sql)
@@ -162,4 +178,3 @@ class GetSQLVariantView(APIView):
 
         except Exception as e:
             return Response({"error": f"Transpilation failed: {str(e)}"}, status=500)
-        

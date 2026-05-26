@@ -21,6 +21,7 @@ class MemoryListCreateView(APIView):
     """GET  /api/memories/  — list the caller's long-term memories.
     POST /api/memories/  — add a user-authored memory.
     """
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -40,6 +41,7 @@ class MemoryDetailView(APIView):
     """PATCH  /api/memories/<id>/ — edit a memory's content.
     DELETE /api/memories/<id>/ — remove a memory.
     """
+
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, memory_id):
@@ -49,14 +51,10 @@ class MemoryDetailView(APIView):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         if memory is None:
-            return Response(
-                {"error": "Memory not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Memory not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response({"memory": memory})
 
     def delete(self, request, memory_id):
         if not ltm.delete_memory(request.user.id, memory_id):
-            return Response(
-                {"error": "Memory not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Memory not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -70,7 +70,9 @@ def reindex_thread(user, agent: str, thread_id: str, raw_messages) -> int:
 
     with transaction.atomic():
         ConversationMessage.objects.filter(
-            user=user, agent=agent, thread_id=thread_id,
+            user=user,
+            agent=agent,
+            thread_id=thread_id,
         ).delete()
         ConversationMessage.objects.bulk_create(
             ConversationMessage(
@@ -86,7 +88,9 @@ def reindex_thread(user, agent: str, thread_id: str, raw_messages) -> int:
     # Populate the tsvector after insert — the documented pattern for search
     # vectors that are refreshed occasionally rather than via a DB trigger.
     ConversationMessage.objects.filter(
-        user=user, agent=agent, thread_id=thread_id,
+        user=user,
+        agent=agent,
+        thread_id=thread_id,
     ).update(search_vector=SearchVector("text", config="english"))
 
     return len(turns)

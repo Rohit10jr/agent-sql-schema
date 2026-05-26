@@ -1,18 +1,17 @@
 import logging
 import os
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from core.models import Connection
 from core.serializers import (
     ConnectionCreateSerializer,
     ConnectionOutSerializer,
     ConnectionUpdateSerializer,
-    FileConnectionCreateSerializer,
 )
 from core.services.connection import ConnectionError, ConnectionService
 from core.services.sample_data import provision_sample_connections
@@ -22,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ConnectView(APIView):
     """POST /api/connect/ — Creates a new database connection from a DSN by validating it, introspecting the database, and saving the connection."""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -46,9 +46,9 @@ class ConnectView(APIView):
 # Accepted file extensions per upload type. Mirrored in the frontend dialog
 # (FILE_TYPE_EXTENSIONS in connection-form-dialog.tsx). Keep both in sync.
 FILE_EXTENSIONS = {
-    "sqlite":   (".sqlite", ".db"),
-    "csv":      (".csv",),
-    "excel":    (".xlsx", ".xlsm"),
+    "sqlite": (".sqlite", ".db"),
+    "csv": (".csv",),
+    "excel": (".xlsx", ".xlsm"),
     "sas7bdat": (".sas7bdat",),
 }
 
@@ -63,6 +63,7 @@ class FileConnectView(APIView):
     are converted to a local SQLite database. Returns 400 on extension
     mismatch so the user gets a clear message instead of a parser crash.
     """
+
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
@@ -110,22 +111,30 @@ class FileConnectView(APIView):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 connection = ConnectionService.create_sqlite_connection(
-                    user=request.user, file_bytes=file.read(), name=name,
+                    user=request.user,
+                    file_bytes=file.read(),
+                    name=name,
                 )
 
             elif file_type == "csv":
                 connection = ConnectionService.create_csv_connection(
-                    user=request.user, file_obj=file, name=name,
+                    user=request.user,
+                    file_obj=file,
+                    name=name,
                 )
 
             elif file_type == "excel":
                 connection = ConnectionService.create_excel_connection(
-                    user=request.user, file_obj=file, name=name,
+                    user=request.user,
+                    file_obj=file,
+                    name=name,
                 )
 
             elif file_type == "sas7bdat":
                 connection = ConnectionService.create_sas_connection(
-                    user=request.user, file_obj=file, name=name,
+                    user=request.user,
+                    file_obj=file,
+                    name=name,
                 )
 
         except ConnectionError as e:
@@ -139,6 +148,7 @@ class FileConnectView(APIView):
 
 class ConnectionListView(APIView):
     """GET /api/connections/ — Returns all saved database connections that belong to the authenticated user."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -150,6 +160,7 @@ class ConnectionListView(APIView):
 
 class ConnectionDetailView(APIView):
     """GET/PATCH/DELETE /api/connection/<id>/ — Retrieves, updates, or deletes a single user-owned database connection by id."""
+
     permission_classes = [IsAuthenticated]
 
     def _get_connection(self, request, connection_id):
@@ -191,6 +202,7 @@ class ConnectionDetailView(APIView):
 
 class ConnectionRefreshView(APIView):
     """POST /api/connection/<id>/refresh/ —  Re-reads the live database schema for an existing connection and updates its saved schema/table options."""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, connection_id):
@@ -210,6 +222,7 @@ class ConnectionRefreshView(APIView):
 class RestoreSampleConnectionsView(APIView):
     """POST /api/connections/restore-samples/ — re-create any sample DB
     connections the user previously deleted. Idempotent."""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
