@@ -76,6 +76,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware', 
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -211,10 +212,10 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
-# Run `python manage.py collectstatic` before each deploy; STATIC_ROOT is the
-# target collectstatic copies into. For serverless/no-nginx deployments, add
-# whitenoise (`pip install whitenoise`), insert its middleware right after
-# SecurityMiddleware, and set STATICFILES_STORAGE to its compressed backend.
+# `collectstatic` (run in the Render build command) copies everything into
+# STATIC_ROOT. WhiteNoise (middleware above) serves from STATIC_ROOT at
+# runtime — needed for the Django admin and DRF browsable API to look right
+# in production without a separate nginx.
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -222,6 +223,18 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # User-uploaded files (avatars, attachments, exports).
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Django 4.2+ STORAGES dict. WhiteNoise's CompressedManifest backend
+# pre-compresses (gzip + brotli) and adds content-hash suffixes to filenames
+# so we can cache them forever.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 SITE_ID = 1
 
