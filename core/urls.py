@@ -24,6 +24,7 @@ from .connection_views import (
 from .sql_views import SQLQueryView, RunSQLView, SQLConversationCreateView, SQLResultUpdateView, ChartRefreshView, ExportCSVView, ThreadResultsView
 from .sql_agent import SqlAgent
 from .run_views import RunCancelView
+from .health_views import healthz
 
 
 
@@ -102,6 +103,9 @@ urlpatterns = [
 
     # Cancel an in-flight schema/SQL agent run
     path('runs/<str:run_id>/cancel/', RunCancelView.as_view(), name='run_cancel'),
+
+    # Liveness + DB readiness probe (no auth)
+    path('healthz/', healthz, name='healthz'),
 
     # Stream
     path('stream/', StreamStateUpdateView.as_view(), name='StreamStateUpdateView'),
