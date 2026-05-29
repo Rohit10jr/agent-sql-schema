@@ -18,8 +18,11 @@ from django.utils.http import urlsafe_base64_encode
 
 def _build_token_link(user, path: str) -> str:
     uid = urlsafe_base64_encode(force_bytes(user.pk))
+    print(f"===uid===:{uid}")
     token = default_token_generator.make_token(user)
+    print(f"===token===:{token}")
     base = settings.FRONTEND_URL.rstrip("/")
+    print(f"===Base URL===:{base}{path}?uid={uid}&token={token}")
     return f"{base}{path}?uid={uid}&token={token}"
 
 
