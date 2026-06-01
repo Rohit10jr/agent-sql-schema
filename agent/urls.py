@@ -18,4 +18,9 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+# Admin branding
+admin.site.site_header = "QueryN Admin"
+admin.site.site_title = "QueryN"
+admin.site.index_title = "Welcome to QueryN"
+
 urlpatterns = [path("admin/", admin.site.urls), path("api/", include("core.urls"))]
