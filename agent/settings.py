@@ -79,11 +79,20 @@ INSTALLED_APPS = [
 # ── Unfold admin UI ────────────────────────────────────────────────
 # Branding + look-and-feel for the Django admin. These supersede the
 # admin.site.site_header / site_title / index_title set in agent/urls.py.
+#
+# "Return to site" target on the admin login/header: in development point at
+# the local frontend; in production honour FRONTEND_URL from env, falling back
+# to the deployed frontend if it isn't set.
+if DEBUG:
+    ADMIN_RETURN_TO_SITE_URL = "http://localhost:3000"
+else:
+    ADMIN_RETURN_TO_SITE_URL = os.getenv("FRONTEND_URL", "https://data-agent-frontend.vercel.app")
+
 UNFOLD = {
     "SITE_TITLE": "QueryN",
     "SITE_HEADER": "QueryN",
     "SITE_SUBHEADER": "Admin",
-    "SITE_URL": "/",
+    "SITE_URL": ADMIN_RETURN_TO_SITE_URL,
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": True,
     "COLORS": {
