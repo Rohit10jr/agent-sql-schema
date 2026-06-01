@@ -164,6 +164,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # __init__.py: re-exports often look like unused imports — allow them.
 "__init__.py" = ["F401"]
+# Legacy agent kept for reference — has assigned-but-unused locals.
+"core/schema_agent_old.py" = ["F841"]
+# Defensive fetch whose assignment documents intent even when unused.
+"core/sql_views.py" = ["F841"]
 
 [tool.ruff.format]
 quote-style = "double"
