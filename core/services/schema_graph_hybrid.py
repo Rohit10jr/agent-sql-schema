@@ -263,6 +263,7 @@ def recall_memories(state: SchemaState, runtime: Runtime[SchemaContext]) -> dict
 
 def route_intent(state: SchemaState, runtime: Runtime[SchemaContext]) -> dict:
     """One cheap classify call → intent ∈ {schema, sql, explain}."""
+    print("===Inside route_intent===")
     bundle = _bundle_for(runtime.context.model)
     router = bundle["router"]
     query = _latest_user_text(state["messages"])
@@ -287,6 +288,7 @@ def route_intent(state: SchemaState, runtime: Runtime[SchemaContext]) -> dict:
 
 def generate_schema_node(state: SchemaState, runtime: Runtime[SchemaContext]) -> dict:
     """Generate or refine the DatabaseSchema. One validation retry, bounded."""
+    print("===Inside generate_schema_node===")
     bundle = _bundle_for(runtime.context.model)
     generator = bundle["schema"]
     query = _latest_user_text(state["messages"])
@@ -328,6 +330,7 @@ def generate_schema_node(state: SchemaState, runtime: Runtime[SchemaContext]) ->
 
 def generate_sql_node(state: SchemaState, runtime: Runtime[SchemaContext]) -> dict:
     """Generate validated SQL + seed data from the schema IR in state."""
+    print("===Inside generate_sql_node===")
     schema_payload = state.get("schema")
     if not schema_payload:
         return {

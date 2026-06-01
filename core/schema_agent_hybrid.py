@@ -43,13 +43,14 @@ def _sse(payload: dict) -> str:
 
 
 # Frontend `currentNode` labels — one per graph node entering.
+# Present-participle phrases so the UI reads naturally as a live progress line.
 _NODE_LABELS = {
-    "summarize": "Compacting earlier turns",
-    "recall": "Recalling what you've told me",
-    "route": "Understanding your request",
+    "summarize": "Summarizing the conversation",
+    "recall": "Reviewing context",
+    "route": "Planning the approach",
     "gen_schema": "Designing the schema",
-    "gen_sql": "Writing SQL + seed data",
-    "respond": "Composing reply",
+    "gen_sql": "Generating SQL and sample data",
+    "respond": "Writing the reply",
 }
 
 
@@ -62,6 +63,7 @@ class SchemaAgentHybrid(APIView):
         return HttpResponse("Hybrid schema agent is running.")
 
     def post(self, request):
+        print("===Inside SchemaAgentHybrid===")
         query = request.data.get("query")
         thread_id = str(request.data.get("thread_id") or uuid4().hex)
 
@@ -141,6 +143,7 @@ class SchemaAgentHybrid(APIView):
             seed_artifact: str | None = None
 
             try:
+                print("===Inside stream_generator===")
                 if new_project:
                     yield _sse({"type": "thread_created", "slug": thread_id})
 
