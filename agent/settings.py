@@ -46,6 +46,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", *_extra_hosts]
 # Application definition
 
 INSTALLED_APPS = [
+    "jazzmin",  # must come before django.contrib.admin to override its templates
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -70,6 +71,28 @@ INSTALLED_APPS = [
     # 'allauth.socialaccount.providers.google',
     # 'allauth.socialaccount.providers.github',
 ]
+
+# ── Jazzmin admin UI ───────────────────────────────────────────────
+# Branding + look-and-feel for the Django admin. These supersede the
+# admin.site.site_header / site_title / index_title set in agent/urls.py.
+JAZZMIN_SETTINGS = {
+    "site_title": "QueryN",
+    "site_header": "QueryN",
+    "site_brand": "QueryN",
+    "welcome_sign": "Welcome to QueryN",
+    "copyright": "QueryN",
+    # Show the UI builder in the top menu (handy while choosing a theme; remove later).
+    "show_ui_builder": True,
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "theme": "flatly",  # try "darkly", "cosmo", "litera", "lumen" etc. via the UI builder
+    "navbar_small_text": False,
+    "sidebar_nav_small_text": False,
+    "sidebar_fixed": True,
+    "navbar_fixed": True,
+    "footer_fixed": False,
+}
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
