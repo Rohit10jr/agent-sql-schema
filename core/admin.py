@@ -1,6 +1,11 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
-from django.contrib.auth.forms import UserChangeForm, UserCreationForm
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from unfold.admin import ModelAdmin
+from unfold.forms import (
+    AdminPasswordChangeForm,
+    UserChangeForm,
+    UserCreationForm,
+)
 
 from .models import ChatSession, Connection, CustomUser, Result, SchemaProject, TokenUsage
 
@@ -17,10 +22,11 @@ class CustomUserChangeForm(UserChangeForm):
 
 
 @admin.register(CustomUser)
-class CustomUserAdmin(UserAdmin):
+class CustomUserAdmin(BaseUserAdmin, ModelAdmin):
     model = CustomUser
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
+    change_password_form = AdminPasswordChangeForm
 
     # Fields to show in the table view
     list_display = (
@@ -70,11 +76,13 @@ class CustomUserAdmin(UserAdmin):
         return obj.full_name
 
 
-admin.site.register(ChatSession)
+@admin.register(ChatSession)
+class ChatSessionAdmin(ModelAdmin):
+    pass
 
 
 @admin.register(Connection)
-class ConnectionAdmin(admin.ModelAdmin):
+class ConnectionAdmin(ModelAdmin):
     list_display = ("id", "name", "type", "database", "user", "is_sample", "created_at")
     list_display_links = ("id", "name")
     search_fields = ("id", "name", "database", "dsn", "user__email")
@@ -83,6 +91,16 @@ class ConnectionAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
-admin.site.register(Result)
-admin.site.register(TokenUsage)
-admin.site.register(SchemaProject)
+@admin.register(Result)
+class ResultAdmin(ModelAdmin):
+    pass
+
+
+@admin.register(TokenUsage)
+class TokenUsageAdmin(ModelAdmin):
+    pass
+
+
+@admin.register(SchemaProject)
+class SchemaProjectAdmin(ModelAdmin):
+    pass

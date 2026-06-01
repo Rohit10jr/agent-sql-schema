@@ -34,6 +34,7 @@ dependencies = [
     "django==6.0.2",
     "django-celery-results>=2.6.0",
     "django-cors-headers>=4.9.0",
+    "django-unfold>=0.95.0",
     "djangorestframework==3.16.1",
     "djangorestframework-simplejwt==5.5.1",
     "docstring-parser==0.17.0",
