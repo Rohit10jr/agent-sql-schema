@@ -46,6 +46,11 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", *_extra_hosts]
 # Application definition
 
 INSTALLED_APPS = [
+    # Unfold admin theme — must come before django.contrib.admin to override
+    # its templates. The contrib extras style filters/forms widgets.
+    "unfold",
+    "unfold.contrib.filters",
+    "unfold.contrib.forms",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -70,6 +75,34 @@ INSTALLED_APPS = [
     # 'allauth.socialaccount.providers.google',
     # 'allauth.socialaccount.providers.github',
 ]
+
+# ── Unfold admin UI ────────────────────────────────────────────────
+# Branding + look-and-feel for the Django admin. These supersede the
+# admin.site.site_header / site_title / index_title set in agent/urls.py.
+UNFOLD = {
+    "SITE_TITLE": "QueryN",
+    "SITE_HEADER": "QueryN",
+    "SITE_SUBHEADER": "Admin",
+    "SITE_URL": "/",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": True,
+    "COLORS": {
+        # Indigo primary palette — tweak to match QueryN's brand later.
+        "primary": {
+            "50": "238 242 255",
+            "100": "224 231 255",
+            "200": "199 210 254",
+            "300": "165 180 252",
+            "400": "129 140 248",
+            "500": "99 102 241",
+            "600": "79 70 229",
+            "700": "67 56 202",
+            "800": "55 48 163",
+            "900": "49 46 129",
+            "950": "30 27 75",
+        },
+    },
+}
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

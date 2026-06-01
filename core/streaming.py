@@ -1,5 +1,5 @@
 import json
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 # from langgraph.checkpoint.postgres import PostgresSaver
 # from psycopg_pool import ConnectionPool
@@ -8,7 +8,7 @@ from django.http import HttpResponse, StreamingHttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from langchain.agents import create_agent
-from langchain.agents.middleware import HumanInTheLoopMiddleware
+from langchain.agents.middleware import HumanInTheLoopMiddleware, after_agent
 from langchain.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -340,13 +340,6 @@ class StreamCommonView(APIView):
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response
-
-
-from typing import Literal
-
-from langchain.agents.middleware import after_agent
-from rest_framework.permissions import AllowAny
-from rest_framework.views import APIView
 
 
 class ResponseSafety(BaseModel):

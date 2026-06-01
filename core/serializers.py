@@ -1,10 +1,11 @@
 from django.contrib.auth import authenticate, get_user_model
-from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+from .models import Connection, Result, SchemaProject
 
 User = get_user_model()
 
@@ -162,8 +163,6 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 # ── Connection Serializers ──────────────────────────────────────────
 
-from core.models import Connection, Result
-
 
 class ConnectionCreateSerializer(serializers.Serializer):
     """Validates input for creating a new DSN-based connection."""
@@ -238,8 +237,6 @@ class ChartRefreshOutSerializer(serializers.Serializer):
 
 
 # ==== SCHEMA Project Serializers ====
-
-from .models import SchemaProject
 
 
 class MessageSerializer(serializers.Serializer):

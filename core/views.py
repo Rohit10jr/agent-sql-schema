@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from typing import TypedDict
 from uuid import uuid4
 
@@ -13,35 +14,22 @@ from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from langchain.messages import AnyMessage
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_groq import ChatGroq
-from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
-from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from .serializers import (
-    PasswordResetConfirmSerializer,
-    PasswordResetRequestSerializer,
-    PasswordResetValidateSerializer,
-)
-
-User = get_user_model()
-
-
-from dataclasses import dataclass
-
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_groq import ChatGroq
 from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.graph import MessagesState
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.store.postgres import PostgresStore
 from langmem.short_term import RunningSummary, SummarizationNode
 from psycopg_pool import ConnectionPool
+from pydantic import BaseModel, Field
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.views import APIView
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -54,9 +42,14 @@ from .models import ChatSession, ConversationMessage, SchemaProject
 from .serializers import (
     EmailTokenObtainPairSerializer,
     PasswordChangeSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetValidateSerializer,
     SignupSerializer,
     UpdateUserProfileSerializer,
 )
+
+User = get_user_model()
 
 # from rest_framework.throttling import UserRateThrottle
 

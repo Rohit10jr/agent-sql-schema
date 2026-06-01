@@ -8,6 +8,9 @@ from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.utils import timezone
 
+from .llm_models import title_model
+from .prompt import AI_SQL_TITLE_PROMPT
+
 
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
@@ -263,14 +266,6 @@ class ConversationMessage(models.Model):
 
 
 # schema model
-import uuid
-
-from django.conf import settings
-from django.db import models
-
-from .llm_models import title_model
-from .prompt import AI_SQL_TITLE_PROMPT
-
 DEFAULT_PROJECT_NAME = "New Project"
 DEFAULT_DESCRIPTION = "Ai generated SQl and Schema"
 
