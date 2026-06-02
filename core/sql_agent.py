@@ -810,18 +810,19 @@ class SqlAgent(APIView):
                     # ─── 1. MESSAGES MODE — token + reasoning streaming ─────
                     if mode == "messages":
                         token, metadata = data
-                        # Skip the `tools` node — its content is the raw tool
-                        # output (e.g. "Columns: ['title']\nRows..."), which we
-                        # surface separately via the tool_result event below.
-                        # Without this filter the same content gets emitted on
-                        # both channels: once as streamed text tokens (which the
-                        # frontend builds into a plain assistant bubble) and
-                        # once as the structured tool_result (which renders as
-                        # the formatted result card). The persisted history
-                        # only stores the structured version, so the streamed
-                        # copy disappears on history refetch at stream end —
-                        # producing a visible layout jerk.
-                        if metadata.get("langgraph_node") == "tools":
+                        # Only stream tokens from the `agent` node — that's the
+                        # user-facing LLM response. Every other node in the
+                        # graph (`summarize`, `recall`, `tools`) is internal
+                        # scratchpad whose output is either not shown to the
+                        # user at all (recall) or surfaced via dedicated SSE
+                        # events (tool_result for tools). Without this
+                        # whitelist, the `summarize` node's compaction text
+                        # streams into the chat as a regular assistant bubble
+                        # and disappears at stream end (it isn't persisted),
+                        # and the `tools` node duplicates its output with the
+                        # structured tool_result event. Matches the schema
+                        # agent's pattern of only streaming its `respond` node.
+                        if metadata.get("langgraph_node") != "agent":
                             continue
                         kind, content = _extract_token_content(token)
                         if content:
