@@ -134,7 +134,7 @@ def _build_bundle(model: str) -> dict:
         "schema": _groq(model, max_tokens=2500, disable_streaming=True).with_structured_output(
             DatabaseSchema
         ),
-        "sql": _groq(model, max_tokens=2000, disable_streaming=True).with_structured_output(
+        "sql": _groq(model, max_tokens=4096, disable_streaming=True).with_structured_output(
             SQLGeneration
         ),
         "respond": _groq(model, max_tokens=600),  # plain text, streamable
@@ -162,7 +162,12 @@ If unsure, prefer "explain"."""
 
 SCHEMA_TOOL_PROMPT = """You are a senior database architect.
 
-Produce a normalized database schema IR by returning a DatabaseSchema object.
+Produce a normalized database schema IR by calling the DatabaseSchema tool.
+
+Output contract (critical):
+- Return the result ONLY through the tool call. Do NOT write any prose, preamble, explanation, or markdown — put any explanation in the `answer` field instead.
+- The tool argument is a SINGLE object with these top-level fields: `dialect`, `tables` (the array of tables), `assumptions`, and `answer`. Do NOT return a bare array of tables — the array must be nested under `tables`.
+
 Rules:
 - Use snake_case names.
 - Every table must have an explicit primary key.
@@ -170,7 +175,7 @@ Rules:
 - Prefer normalized 3NF design unless the user asks for denormalization.
 - Include practical indexes for common lookup and join columns.
 - Do not invent sensitive user data, credentials, or secrets.
-- If requirements are vague, make conservative assumptions and list them.
+- If requirements are vague, make conservative assumptions and list them in `assumptions`.
 """
 
 
@@ -181,8 +186,12 @@ Rules:
 - `sql` contains CREATE TABLE statements only.
 - `seed_data` contains INSERT statements only.
 - Create parent tables before child tables.
-- Include primary keys, foreign keys, unique constraints, NOT NULL, defaults, and useful indexes when represented by the schema IR.
+- Include primary keys, foreign keys, unique constraints, NOT NULL, and defaults when represented by the schema IR.
+- Declare uniqueness inline (`UNIQUE` on the column or a table `UNIQUE (...)` constraint). Do NOT also emit a separate `CREATE UNIQUE INDEX` for the same column — that is redundant.
+- Do NOT create indexes on primary-key columns; the PK already provides one.
+- Only add a `CREATE INDEX` for non-unique foreign-key / frequent-lookup columns not already covered by a PK or unique constraint.
 - Generate ~3 seed rows per table. Keep values simple and properly escaped.
+- Be concise: emit the SQL once, completely. Never truncate mid-statement.
 """
 
 
