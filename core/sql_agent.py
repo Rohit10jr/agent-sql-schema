@@ -810,6 +810,19 @@ class SqlAgent(APIView):
                     # ─── 1. MESSAGES MODE — token + reasoning streaming ─────
                     if mode == "messages":
                         token, metadata = data
+                        # Skip the `tools` node — its content is the raw tool
+                        # output (e.g. "Columns: ['title']\nRows..."), which we
+                        # surface separately via the tool_result event below.
+                        # Without this filter the same content gets emitted on
+                        # both channels: once as streamed text tokens (which the
+                        # frontend builds into a plain assistant bubble) and
+                        # once as the structured tool_result (which renders as
+                        # the formatted result card). The persisted history
+                        # only stores the structured version, so the streamed
+                        # copy disappears on history refetch at stream end —
+                        # producing a visible layout jerk.
+                        if metadata.get("langgraph_node") == "tools":
+                            continue
                         kind, content = _extract_token_content(token)
                         if content:
                             yield _sse(
